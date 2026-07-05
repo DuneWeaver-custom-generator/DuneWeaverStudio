@@ -32,6 +32,8 @@
     "outlineValue",
     "rhoInput",
     "rhoValue",
+    "ballSizeInput",
+    "ballSizeValue",
     "startCenterInput",
     "endCenterInput",
     "maskPreviewInput",
@@ -79,6 +81,7 @@
     angleRad: 0,
     outlinePasses: 1,
     rhoMax: 0.96,
+    ballDiameter: 0.019,
     startCenter: true,
     endCenter: true,
     showMask: true,
@@ -117,6 +120,7 @@
       "angleInput",
       "outlineInput",
       "rhoInput",
+      "ballSizeInput",
       "startCenterInput",
       "endCenterInput",
     ];
@@ -328,6 +332,7 @@
     state.angleRad = (Number(el.angleInput.value) * Math.PI) / 180;
     state.outlinePasses = Number(el.outlineInput.value);
     state.rhoMax = Number(el.rhoInput.value) / 100;
+    state.ballDiameter = Number(el.ballSizeInput.value) / 1000;
     state.startCenter = el.startCenterInput.checked;
     state.endCenter = el.endCenterInput.checked;
     state.showMask = el.maskPreviewInput.checked;
@@ -341,6 +346,7 @@
     el.angleValue.textContent = `${Math.round((state.angleRad * 180) / Math.PI)} deg`;
     el.outlineValue.textContent = String(state.outlinePasses);
     el.rhoValue.textContent = state.rhoMax.toFixed(2);
+    el.ballSizeValue.textContent = `${(state.ballDiameter * 100).toFixed(1)}%`;
   }
 
   function rebuildMask() {
@@ -587,6 +593,27 @@
       return false;
     }
 
+    if (!isMaskPointInside(x, y)) {
+      return false;
+    }
+
+    const ballRadius = state.ballDiameter;
+    if (ballRadius <= 0.004) {
+      return true;
+    }
+
+    const samples = ballRadius > 0.035 ? 12 : 8;
+    for (let i = 0; i < samples; i += 1) {
+      const angle = (i / samples) * TWO_PI;
+      if (!isMaskPointInside(x + Math.cos(angle) * ballRadius, y + Math.sin(angle) * ballRadius)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  function isMaskPointInside(x, y) {
     const sx = x / state.shapeScale;
     const sy = y / state.shapeScale;
 
@@ -1175,19 +1202,27 @@
 
     const index = Math.min(state.path.length - 1, Math.floor(state.progress * (state.path.length - 1)));
     const p = toCanvas(state.path[index], cx, cy, radius);
+    const ballRadius = Math.max(3, radius * state.ballDiameter);
+    const highlightRadius = Math.max(1.6, ballRadius * 0.32);
 
     ctx.save();
     ctx.shadowColor = colors.shadow;
-    ctx.shadowBlur = 10;
-    ctx.shadowOffsetY = 4;
+    ctx.shadowBlur = Math.max(8, ballRadius * 1.7);
+    ctx.shadowOffsetY = Math.max(2, ballRadius * 0.45);
+    ctx.fillStyle = colors.ball;
+    ctx.globalAlpha = 0.16;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, ballRadius * 1.85, 0, TWO_PI);
+    ctx.fill();
+    ctx.globalAlpha = 1;
     ctx.fillStyle = colors.ball;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, Math.max(5, radius * 0.019), 0, TWO_PI);
+    ctx.arc(p.x, p.y, ballRadius, 0, TWO_PI);
     ctx.fill();
     ctx.shadowColor = "transparent";
     ctx.fillStyle = colors.ballHighlight;
     ctx.beginPath();
-    ctx.arc(p.x - radius * 0.006, p.y - radius * 0.007, Math.max(2, radius * 0.006), 0, TWO_PI);
+    ctx.arc(p.x - ballRadius * 0.32, p.y - ballRadius * 0.38, highlightRadius, 0, TWO_PI);
     ctx.fill();
     ctx.restore();
   }
