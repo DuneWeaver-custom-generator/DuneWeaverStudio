@@ -313,10 +313,15 @@
       path.push(point(0, 0, "connector"));
     }
 
-    appendChains(path, fillSegments, "fill", clearIn || clearOut);
+    const scanlineFill = state.fillMode === "waves" || state.fillMode === "sweep";
+    if (scanlineFill) {
+      appendScanlineComponents(path, fillSegments, outlineSegments);
+    } else {
+      appendChains(path, fillSegments, "fill", clearIn || clearOut);
 
-    for (let pass = 0; pass < state.outlinePasses; pass += 1) {
-      appendChains(path, cloneSegments(outlineSegments), "outline");
+      for (let pass = 0; pass < state.outlinePasses; pass += 1) {
+        appendChains(path, cloneSegments(outlineSegments), "outline");
+      }
     }
 
     if (state.endCenter && !clearIn && path.length > 0) {
@@ -614,6 +619,7 @@
       const rowSegments = traceParametric((t) => rotateLocal(-span + t * span * 2, y), steps);
       if (row % 2 === 1) {
         rowSegments.forEach((segment) => segment.reverse());
+        rowSegments.reverse();
       }
       segments.push(...rowSegments);
       row += 1;
@@ -638,6 +644,7 @@
 
       if (row % 2 === 1) {
         rowSegments.forEach((segment) => segment.reverse());
+        rowSegments.reverse();
       }
       segments.push(...rowSegments);
       row += 1;
@@ -1005,6 +1012,119 @@
 
       next.forEach((p) => appendPoint(path, point(p.x, p.y, kind)));
     }
+  }
+
+  function appendScanlineComponents(path, fillSegments, outlineSegments) {
+    const fillGroups = groupSegmentsByRouteLabel(fillSegments);
+    const outlineGroups = new Map(groupSegmentsByRouteLabel(outlineSegments).map((group) => [group.label, group]));
+
+    while (fillGroups.length > 0) {
+      const selection = selectNearestGroup(path, fillGroups);
+      const group = fillGroups.splice(selection.index, 1)[0];
+      const segments = cloneSegments(group.segments);
+
+      if (selection.reverse) {
+        reverseSegmentSequence(segments);
+      }
+
+      appendChains(path, segments, "fill", true);
+
+      const outlines = outlineGroups.get(group.label);
+      if (outlines) {
+        appendOutlinePasses(path, outlines.segments);
+        outlineGroups.delete(group.label);
+      }
+    }
+
+    const remainingOutlines = Array.from(outlineGroups.values());
+    while (remainingOutlines.length > 0) {
+      const selection = selectNearestGroup(path, remainingOutlines);
+      const group = remainingOutlines.splice(selection.index, 1)[0];
+      const segments = cloneSegments(group.segments);
+
+      if (selection.reverse) {
+        reverseSegmentSequence(segments);
+      }
+
+      appendOutlinePasses(path, segments);
+    }
+  }
+
+  function appendOutlinePasses(path, segments) {
+    for (let pass = 0; pass < state.outlinePasses; pass += 1) {
+      appendChains(path, cloneSegments(segments), "outline");
+    }
+  }
+
+  function groupSegmentsByRouteLabel(segments) {
+    const groups = new Map();
+
+    segments.forEach((segment) => {
+      if (segment.length < 2) {
+        return;
+      }
+
+      const label = routeLabelForSegment(segment);
+      if (!groups.has(label)) {
+        groups.set(label, { label, segments: [] });
+      }
+      groups.get(label).segments.push(segment);
+    });
+
+    return Array.from(groups.values());
+  }
+
+  function selectNearestGroup(path, groups) {
+    const current = path.length > 0 ? path[path.length - 1] : point(0, 0, "connector");
+    let bestIndex = 0;
+    let bestReverse = false;
+    let bestScore = Infinity;
+
+    groups.forEach((group, index) => {
+      const start = firstPointInSegments(group.segments);
+      const end = lastPointInSegments(group.segments);
+      if (!start || !end) {
+        return;
+      }
+
+      const startScore = groupTravelScore(current, start, group.label);
+      const endScore = groupTravelScore(current, end, group.label);
+
+      if (startScore < bestScore) {
+        bestIndex = index;
+        bestReverse = false;
+        bestScore = startScore;
+      }
+
+      if (endScore < bestScore) {
+        bestIndex = index;
+        bestReverse = true;
+        bestScore = endScore;
+      }
+    });
+
+    return { index: bestIndex, reverse: bestReverse };
+  }
+
+  function groupTravelScore(current, target, targetLabel) {
+    const currentLabel = routeLabelForPoint(current);
+    const labelPenalty = currentLabel > 0 && targetLabel > 0 && currentLabel !== targetLabel ? 0.65 : 0;
+    return distanceSquared(current, target) + labelPenalty;
+  }
+
+  function reverseSegmentSequence(segments) {
+    segments.reverse();
+    segments.forEach((segment) => segment.reverse());
+  }
+
+  function firstPointInSegments(segments) {
+    const first = segments[0];
+    return first ? first[0] : null;
+  }
+
+  function lastPointInSegments(segments) {
+    const last = segments[segments.length - 1];
+    return last ? last[last.length - 1] : null;
   }
 
   function appendConnector(path, target) {
