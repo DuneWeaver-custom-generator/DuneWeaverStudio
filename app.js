@@ -306,11 +306,12 @@
     rebuildMask();
 
     const fillSegments = generateFillSegments();
+    const passthroughSegments = state.fillMode === "imagePattern" ? generatePatternPassthroughSegments() : [];
     const outlineSegments = extractOutlineSegments();
     const path = [];
     state.drawnMask = new Uint8Array(MASK_SIZE * MASK_SIZE);
 
-    state.fillSegmentCount = fillSegments.length;
+    state.fillSegmentCount = fillSegments.length + passthroughSegments.length;
     state.outlineSegmentCount = outlineSegments.length * state.outlinePasses;
     state.currentOutlineSegments = outlineSegments;
 
@@ -322,7 +323,10 @@
     }
 
     const scanlineFill = state.fillMode === "waves" || state.fillMode === "sweep" || state.fillMode === "imagePattern";
-    if (scanlineFill) {
+    if (state.fillMode === "imagePattern") {
+      appendChains(path, passthroughSegments, "fill", true);
+      appendScanlineComponents(path, fillSegments, outlineSegments);
+    } else if (scanlineFill) {
       appendScanlineComponents(path, fillSegments, outlineSegments);
     } else {
       appendChains(path, fillSegments, "fill", clearIn || clearOut);
@@ -842,6 +846,49 @@
     }, steps);
   }
 
+  function generatePatternPassthroughSegments() {
+    const segments = [];
+    const passGap = Math.max(0.04, state.spacing * 2.4, state.ballDiameter * 2.6);
+    const turns = clamp(Math.round(0.98 / passGap), 7, 28);
+    const steps = turns * 260;
+    let run = [];
+
+    for (let i = 0; i <= steps; i += 1) {
+      const t = i / steps;
+      const radius = 0.018 + t * 0.965;
+      const angle = t * TWO_PI * turns - Math.PI / 2;
+      const p = {
+        x: Math.cos(angle) * radius,
+        y: Math.sin(angle) * radius,
+      };
+
+      if (isPatternOpenSpace(p.x, p.y)) {
+        run.push(p);
+      } else {
+        closeRun();
+      }
+    }
+
+    closeRun();
+    return segments;
+
+    function closeRun() {
+      if (run.length >= 2 && totalPathLength(run) > passGap * 0.8) {
+        segments.push(run);
+      }
+      run = [];
+    }
+  }
+
+  function isPatternOpenSpace(x, y) {
+    if (!inTable(x, y)) {
+      return false;
+    }
+
+    const cell = worldToMaskCell(x, y);
+    return Boolean(cell && !state.mask[cell.index]);
+  }
+
   function traceParametric(getPoint, steps) {
     const segments = [];
     let run = [];
@@ -1286,7 +1333,7 @@
     const start = path[path.length - 1];
     const routed = findConnectorRoute(start, target);
     if (routed && routed.length > 1) {
-      routed.slice(1).forEach((p) => appendPoint(path, point(p.x, p.y, "connector")));
+      routed.slice(1).forEach((p) => appendPoint(path, point(p.x, p.y, connectorKindForPoint(p))));
       return;
     }
 
@@ -1299,16 +1346,54 @@
 
     for (let i = 1; i <= steps; i += 1) {
       const t = i / steps;
+      const p = {
+        x: start.x + (target.x - start.x) * t,
+        y: start.y + (target.y - start.y) * t,
+      };
       appendPoint(
         path,
-        point(start.x + (target.x - start.x) * t, start.y + (target.y - start.y) * t, "connector"),
+        point(p.x, p.y, connectorKindForPoint(p)),
       );
     }
+  }
+
+  function connectorKindForPoint(p) {
+    return state.fillMode === "imagePattern" && isDrawnNearPoint(p) ? "retrace" : "connector";
+  }
+
+  function isDrawnNearPoint(p) {
+    const cell = worldToMaskCell(p.x, p.y);
+    if (!cell) {
+      return false;
+    }
+
+    for (let oy = -1; oy <= 1; oy += 1) {
+      for (let ox = -1; ox <= 1; ox += 1) {
+        const nx = cell.x + ox;
+        const ny = cell.y + oy;
+        if (nx < 0 || nx >= MASK_SIZE || ny < 0 || ny >= MASK_SIZE) {
+          continue;
+        }
+        if (state.drawnMask[ny * MASK_SIZE + nx]) {
+          return true;
+        }
+      }
+    }
+
+    return false;
   }
 
   function findConnectorRoute(start, target) {
     const connectorDistance = distance(start, target);
     const shortHop = Math.max(MAX_STEP * 5, state.ballDiameter * 1.25);
+
+    if (state.fillMode === "imagePattern") {
+      const startDirect = routeCellAtPoint(start);
+      const targetDirect = routeCellAtPoint(target);
+      if (!startDirect || !targetDirect || startDirect.label !== targetDirect.label) {
+        return findPatternConnectorRoute(start, target);
+      }
+    }
 
     if (connectorDistance <= shortHop && isConnectorSafe(start, target)) {
       return [start, target];
@@ -1318,10 +1403,29 @@
     const targetCell = nearestRouteCell(target);
 
     if (!startCell || !targetCell || startCell.label !== targetCell.label) {
-      return null;
+      return state.fillMode === "imagePattern" ? findPatternConnectorRoute(start, target) : null;
     }
 
     const cellRoute = aStarRoute(startCell.index, targetCell.index);
+    if (!cellRoute || cellRoute.length < 2) {
+      return state.fillMode === "imagePattern" ? findPatternConnectorRoute(start, target) : null;
+    }
+
+    const route = [start];
+    simplifyCellRoute(cellRoute).forEach((index) => route.push(maskCellToWorld(index)));
+    route.push(target);
+    return route;
+  }
+
+  function findPatternConnectorRoute(start, target) {
+    const startCell = worldToMaskCell(start.x, start.y);
+    const targetCell = worldToMaskCell(target.x, target.y);
+
+    if (!startCell || !targetCell) {
+      return null;
+    }
+
+    const cellRoute = aStarPatternRoute(startCell.index, targetCell.index);
     if (!cellRoute || cellRoute.length < 2) {
       return null;
     }
@@ -1386,6 +1490,14 @@
     }
 
     return null;
+  }
+
+  function routeCellAtPoint(p) {
+    const cell = worldToMaskCell(p.x, p.y);
+    if (!cell || !state.routeMask[cell.index]) {
+      return null;
+    }
+    return { index: cell.index, label: state.routeLabels[cell.index] };
   }
 
   function routeLabelForPoint(p) {
@@ -1475,6 +1587,90 @@
     return null;
   }
 
+  function aStarPatternRoute(startIndex, targetIndex) {
+    if (startIndex === targetIndex) {
+      return [startIndex];
+    }
+
+    const total = MASK_SIZE * MASK_SIZE;
+    const gScore = new Float32Array(total);
+    const cameFrom = new Int32Array(total);
+    const closed = new Uint8Array(total);
+    gScore.fill(Infinity);
+    cameFrom.fill(-1);
+
+    const targetX = targetIndex % MASK_SIZE;
+    const targetY = Math.floor(targetIndex / MASK_SIZE);
+    const heap = [];
+    gScore[startIndex] = 0;
+    heapPush(heap, startIndex, heuristic(startIndex, targetX, targetY));
+
+    const directions = [
+      [-1, 0, 1],
+      [1, 0, 1],
+      [0, -1, 1],
+      [0, 1, 1],
+      [-1, -1, Math.SQRT2],
+      [1, -1, Math.SQRT2],
+      [-1, 1, Math.SQRT2],
+      [1, 1, Math.SQRT2],
+    ];
+    let expanded = 0;
+    const maxExpanded = total;
+
+    while (heap.length && expanded < maxExpanded) {
+      const current = heapPop(heap);
+      if (closed[current]) {
+        continue;
+      }
+      if (current === targetIndex) {
+        return reconstructRoute(cameFrom, current);
+      }
+
+      closed[current] = 1;
+      expanded += 1;
+      const cx = current % MASK_SIZE;
+      const cy = Math.floor(current / MASK_SIZE);
+
+      for (const [dx, dy, cost] of directions) {
+        const nx = cx + dx;
+        const ny = cy + dy;
+        if (nx < 0 || nx >= MASK_SIZE || ny < 0 || ny >= MASK_SIZE) {
+          continue;
+        }
+
+        const next = ny * MASK_SIZE + nx;
+        if (closed[next] || !isPatternTravelCell(next)) {
+          continue;
+        }
+        if (dx !== 0 && dy !== 0) {
+          const sideA = cy * MASK_SIZE + nx;
+          const sideB = ny * MASK_SIZE + cx;
+          if (!isPatternTravelCell(sideA) || !isPatternTravelCell(sideB)) {
+            continue;
+          }
+        }
+
+        const tentative = gScore[current] + cost * patternTravelCost(next, startIndex, targetIndex);
+        if (tentative < gScore[next]) {
+          cameFrom[next] = current;
+          gScore[next] = tentative;
+          heapPush(heap, next, tentative + heuristic(next, targetX, targetY) * 0.22);
+        }
+      }
+    }
+
+    return null;
+  }
+
+  function isPatternTravelCell(index) {
+    const x = index % MASK_SIZE;
+    const y = Math.floor(index / MASK_SIZE);
+    const nx = (x / (MASK_SIZE - 1)) * 2 - 1;
+    const ny = (y / (MASK_SIZE - 1)) * 2 - 1;
+    return nx * nx + ny * ny <= 0.985 * 0.985;
+  }
+
   function travelCost(index) {
     if (state.drawnMask[index]) {
       return 0.12;
@@ -1506,6 +1702,61 @@
     }
 
     return 18;
+  }
+
+  function patternTravelCost(index, startIndex, targetIndex) {
+    if (nearCell(index, startIndex, 3) || nearCell(index, targetIndex, 3)) {
+      return 0.2;
+    }
+    if (state.drawnMask[index]) {
+      return 0.05;
+    }
+
+    const nearDrawn = nearestDrawnCost(index);
+    if (nearDrawn > 0) {
+      return nearDrawn;
+    }
+
+    if (!state.routeMask[index]) {
+      return 4.0;
+    }
+    if (state.routeEdgeMask[index]) {
+      return 10;
+    }
+    return 60;
+  }
+
+  function nearestDrawnCost(index) {
+    const x = index % MASK_SIZE;
+    const y = Math.floor(index / MASK_SIZE);
+
+    for (let radius = 1; radius <= 3; radius += 1) {
+      for (let oy = -radius; oy <= radius; oy += 1) {
+        for (let ox = -radius; ox <= radius; ox += 1) {
+          if (Math.abs(ox) !== radius && Math.abs(oy) !== radius) {
+            continue;
+          }
+          const nx = x + ox;
+          const ny = y + oy;
+          if (nx < 0 || nx >= MASK_SIZE || ny < 0 || ny >= MASK_SIZE) {
+            continue;
+          }
+          if (state.drawnMask[ny * MASK_SIZE + nx]) {
+            return 0.18 + radius * 0.18;
+          }
+        }
+      }
+    }
+
+    return 0;
+  }
+
+  function nearCell(index, targetIndex, radius) {
+    const x = index % MASK_SIZE;
+    const y = Math.floor(index / MASK_SIZE);
+    const tx = targetIndex % MASK_SIZE;
+    const ty = Math.floor(targetIndex / MASK_SIZE);
+    return Math.abs(x - tx) <= radius && Math.abs(y - ty) <= radius;
   }
 
   function heuristic(index, targetX, targetY) {
@@ -1618,7 +1869,7 @@
           continue;
         }
         const index = ny * MASK_SIZE + nx;
-        if (state.routeMask[index]) {
+        if (state.routeMask[index] || state.fillMode === "imagePattern") {
           state.drawnMask[index] = 1;
         }
       }

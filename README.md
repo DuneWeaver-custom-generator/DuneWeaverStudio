@@ -16,6 +16,8 @@ The app uses the mask for fill decisions because that is more dependable for ras
 
 Choose `Image pattern` in `Fill type` to turn the uploaded image into a repeated motif across the table. `Pattern density` controls the base repeat count, `Image size` controls the size of each repeat, and `Logo size` acts as an extra motif-size multiplier. When the logo is made smaller, the app automatically adds more repeats instead of shrinking the pattern into the center of the table. In this mode, the `Angle` slider rotates each repeated logo tile so long logos can be packed in a better direction.
 
+Image pattern mode also adds one clipped concentric pass through the open sand between logos before drawing the logo tiles. Travel moves between separate logos prefer that already-drawn pass, which keeps the background cleaner than scattered diagonal bridges.
+
 ## Ball Size
 
 The `Ball size` control is measured in millimeters. Set `Table dia.` to your Dune Weaver table diameter, defaulting to 250 mm, so the app can convert the physical ball size into the normalized `.thr` geometry. The setting changes the preview ball and clips generated fill paths so the ball footprint stays inside the uploaded logo mask.
