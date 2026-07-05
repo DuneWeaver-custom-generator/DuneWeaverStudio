@@ -8,18 +8,13 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -28,19 +23,40 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v6
 
+      - name: Validate app script
+        run: node --check app.js
+
       - name: Prepare static site
         run: |
           rm -rf _site
           mkdir -p _site
-          cp index.html styles.css app.js README.md _site/
+          cp index.html styles.css app.js _site/
           cp .nojekyll _site/.nojekyll
           test -f _site/index.html
+          test -s _site/app.js
+          test -s _site/styles.css
+          grep -q 'src="app.js"' _site/index.html
+          grep -q 'href="styles.css"' _site/index.html
+
+      - name: List packaged site
+        run: find _site -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
 
       - name: Upload static site
         uses: actions/upload-pages-artifact@v5
         with:
           path: _site
           include-hidden-files: true
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
 
       - name: Deploy to GitHub Pages
         id: deployment
