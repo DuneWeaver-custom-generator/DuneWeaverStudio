@@ -59,6 +59,7 @@
             <span>Fill type</span>
             <select id="fillModeInput">
               <option value="waves">Wave fill</option>
+              <option value="imagePattern">Image pattern</option>
               <option value="sweep">Flatten sweep</option>
               <option value="orbit">Orbit polish</option>
               <option value="spiral">Spiral polish</option>
@@ -88,6 +89,16 @@
             <span>Wave count</span>
             <input id="frequencyInput" type="range" min="2" max="18" value="8" />
             <strong id="frequencyValue">8</strong>
+          </label>
+          <label class="range-row">
+            <span>Pattern density</span>
+            <input id="patternDensityInput" type="range" min="2" max="10" value="4" />
+            <strong id="patternDensityValue">4x</strong>
+          </label>
+          <label class="range-row">
+            <span>Image size</span>
+            <input id="patternSizeInput" type="range" min="8" max="55" value="24" />
+            <strong id="patternSizeValue">24%</strong>
           </label>
           <label class="range-row">
             <span>Angle</span>

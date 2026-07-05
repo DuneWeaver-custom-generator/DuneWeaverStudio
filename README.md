@@ -7,10 +7,14 @@ Static web app for turning a logo/image into a filled `.thr` path.
 1. Load a PNG, JPEG, WEBP, or SVG.
 2. Convert the image into a binary mask using transparency or brightness thresholding.
 3. Trace that mask into vector contours for boundary passes and optional SVG export.
-4. Generate interior ball motion from the mask with wave, sweep, orbit, or spiral fills.
+4. Generate interior ball motion from the mask with wave, image pattern, sweep, orbit, or spiral fills.
 5. Convert the final continuous path into Theta Rho `.thr` rows.
 
 The app uses the mask for fill decisions because that is more dependable for raster logos than forcing every image through SVG first. The SVG trace export is included as a checkpoint and reusable vector artifact.
+
+## Image Pattern Mode
+
+Choose `Image pattern` in `Fill type` to turn the uploaded image into a repeated motif across the table. `Pattern density` controls how many motif repeats are laid out, and `Image size` controls the size of each repeat. The app builds the repeated mask first, then fills and outlines each connected motif using the same ball-aware path routing as the regular logo fill modes.
 
 ## Ball Size
 

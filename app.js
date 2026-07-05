@@ -26,6 +26,10 @@
     "amplitudeValue",
     "frequencyInput",
     "frequencyValue",
+    "patternDensityInput",
+    "patternDensityValue",
+    "patternSizeInput",
+    "patternSizeValue",
     "angleInput",
     "angleValue",
     "outlineInput",
@@ -84,6 +88,8 @@
     spacing: 0.044,
     amplitude: 0.022,
     frequency: 8,
+    patternDensity: 4,
+    patternSize: 0.24,
     angleRad: 0,
     outlinePasses: 1,
     rhoMax: 0.96,
@@ -125,6 +131,8 @@
       "spacingInput",
       "amplitudeInput",
       "frequencyInput",
+      "patternDensityInput",
+      "patternSizeInput",
       "angleInput",
       "outlineInput",
       "rhoInput",
@@ -313,7 +321,7 @@
       path.push(point(0, 0, "connector"));
     }
 
-    const scanlineFill = state.fillMode === "waves" || state.fillMode === "sweep";
+    const scanlineFill = state.fillMode === "waves" || state.fillMode === "sweep" || state.fillMode === "imagePattern";
     if (scanlineFill) {
       appendScanlineComponents(path, fillSegments, outlineSegments);
     } else {
@@ -344,6 +352,8 @@
     state.spacing = Number(el.spacingInput.value) / 1000;
     state.amplitude = Number(el.amplitudeInput.value) / 1000;
     state.frequency = Number(el.frequencyInput.value);
+    state.patternDensity = Number(el.patternDensityInput.value);
+    state.patternSize = Number(el.patternSizeInput.value) / 100;
     state.angleRad = (Number(el.angleInput.value) * Math.PI) / 180;
     state.outlinePasses = Number(el.outlineInput.value);
     state.rhoMax = Number(el.rhoInput.value) / 100;
@@ -360,6 +370,8 @@
     el.spacingValue.textContent = state.spacing.toFixed(3);
     el.amplitudeValue.textContent = state.amplitude.toFixed(3);
     el.frequencyValue.textContent = String(state.frequency);
+    el.patternDensityValue.textContent = `${state.patternDensity}x`;
+    el.patternSizeValue.textContent = `${Math.round(state.patternSize * 100)}%`;
     el.angleValue.textContent = `${Math.round((state.angleRad * 180) / Math.PI)} deg`;
     el.outlineValue.textContent = String(state.outlinePasses);
     el.rhoValue.textContent = state.rhoMax.toFixed(2);
@@ -407,11 +419,116 @@
       mask[p] = inside ? 1 : 0;
     }
 
-    state.mask = cleanMask(mask);
+    const sourceMask = cleanMask(mask);
+    state.mask = state.fillMode === "imagePattern" ? cleanMask(createImagePatternMask(sourceMask)) : sourceMask;
     state.routeMask = createRouteMask(state.mask);
     state.routeLabels = labelRouteComponents(state.routeMask);
     state.routeEdgeMask = createRouteEdgeMask(state.routeMask);
     state.maskPreviewCanvas = createMaskPreviewCanvas(state.mask);
+  }
+
+  function createImagePatternMask(sourceMask) {
+    const bounds = maskBounds(sourceMask);
+    if (!bounds) {
+      return sourceMask;
+    }
+
+    const out = new Uint8Array(sourceMask.length);
+    const motifWidth = bounds.maxX - bounds.minX + 1;
+    const motifHeight = bounds.maxY - bounds.minY + 1;
+    const maxMotifSide = Math.max(1, motifWidth, motifHeight);
+    const stampMaxSide = Math.max(6, Math.round(MASK_SIZE * clamp(state.patternSize, 0.08, 0.55)));
+    const stampWidth = Math.max(3, Math.round((motifWidth / maxMotifSide) * stampMaxSide));
+    const stampHeight = Math.max(3, Math.round((motifHeight / maxMotifSide) * stampMaxSide));
+    const density = clamp(Math.round(state.patternDensity), 2, 10);
+    const step = MASK_SIZE / density;
+    const start = step / 2;
+
+    for (let row = 0; row < density; row += 1) {
+      const cy = start + row * step;
+      const stagger = row % 2 === 1 ? step / 2 : 0;
+
+      for (let col = -1; col <= density; col += 1) {
+        const cx = start + col * step + stagger;
+        if (!stampCanTouchTable(cx, cy, stampWidth, stampHeight)) {
+          continue;
+        }
+        stampMask(sourceMask, bounds, out, cx, cy, stampWidth, stampHeight);
+      }
+    }
+
+    return out;
+  }
+
+  function maskBounds(mask) {
+    let minX = MASK_SIZE;
+    let minY = MASK_SIZE;
+    let maxX = -1;
+    let maxY = -1;
+
+    for (let y = 0; y < MASK_SIZE; y += 1) {
+      for (let x = 0; x < MASK_SIZE; x += 1) {
+        if (!mask[y * MASK_SIZE + x]) {
+          continue;
+        }
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+      }
+    }
+
+    return maxX >= minX && maxY >= minY ? { minX, minY, maxX, maxY } : null;
+  }
+
+  function stampCanTouchTable(cx, cy, width, height) {
+    const corners = [
+      [cx - width / 2, cy - height / 2],
+      [cx + width / 2, cy - height / 2],
+      [cx - width / 2, cy + height / 2],
+      [cx + width / 2, cy + height / 2],
+      [cx, cy],
+    ];
+
+    return corners.some(([x, y]) => {
+      const nx = (x / (MASK_SIZE - 1)) * 2 - 1;
+      const ny = (y / (MASK_SIZE - 1)) * 2 - 1;
+      return nx * nx + ny * ny <= 1.04;
+    });
+  }
+
+  function stampMask(sourceMask, bounds, out, cx, cy, width, height) {
+    const left = Math.round(cx - width / 2);
+    const top = Math.round(cy - height / 2);
+    const sourceWidth = Math.max(1, bounds.maxX - bounds.minX);
+    const sourceHeight = Math.max(1, bounds.maxY - bounds.minY);
+
+    for (let y = 0; y < height; y += 1) {
+      const ty = top + y;
+      if (ty < 0 || ty >= MASK_SIZE) {
+        continue;
+      }
+
+      const sy = bounds.minY + Math.round((y / Math.max(1, height - 1)) * sourceHeight);
+
+      for (let x = 0; x < width; x += 1) {
+        const tx = left + x;
+        if (tx < 0 || tx >= MASK_SIZE) {
+          continue;
+        }
+
+        const nx = (tx / (MASK_SIZE - 1)) * 2 - 1;
+        const ny = (ty / (MASK_SIZE - 1)) * 2 - 1;
+        if (nx * nx + ny * ny > 0.985 * 0.985) {
+          continue;
+        }
+
+        const sx = bounds.minX + Math.round((x / Math.max(1, width - 1)) * sourceWidth);
+        if (sourceMask[sy * MASK_SIZE + sx]) {
+          out[ty * MASK_SIZE + tx] = 1;
+        }
+      }
+    }
   }
 
   function createRouteMask(mask) {
