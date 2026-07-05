@@ -66,6 +66,8 @@
     mask: new Uint8Array(MASK_SIZE * MASK_SIZE),
     routeMask: new Uint8Array(MASK_SIZE * MASK_SIZE),
     routeLabels: new Int32Array(MASK_SIZE * MASK_SIZE),
+    routeEdgeMask: new Uint8Array(MASK_SIZE * MASK_SIZE),
+    drawnMask: new Uint8Array(MASK_SIZE * MASK_SIZE),
     maskPreviewCanvas: null,
     path: [],
     thr: "",
@@ -85,8 +87,8 @@
     angleRad: 0,
     outlinePasses: 1,
     rhoMax: 0.96,
-    tableDiameterMm: 500,
-    ballSizeMm: 10,
+    tableDiameterMm: 250,
+    ballSizeMm: 6,
     ballDiameter: 0.02,
     startCenter: true,
     endCenter: true,
@@ -298,6 +300,7 @@
     const fillSegments = generateFillSegments();
     const outlineSegments = extractOutlineSegments();
     const path = [];
+    state.drawnMask = new Uint8Array(MASK_SIZE * MASK_SIZE);
 
     state.fillSegmentCount = fillSegments.length;
     state.outlineSegmentCount = outlineSegments.length * state.outlinePasses;
@@ -402,6 +405,7 @@
     state.mask = cleanMask(mask);
     state.routeMask = createRouteMask(state.mask);
     state.routeLabels = labelRouteComponents(state.routeMask);
+    state.routeEdgeMask = createRouteEdgeMask(state.routeMask);
     state.maskPreviewCanvas = createMaskPreviewCanvas(state.mask);
   }
 
@@ -493,6 +497,38 @@
     }
 
     return labels;
+  }
+
+  function createRouteEdgeMask(routeMask) {
+    const edgeMask = new Uint8Array(routeMask.length);
+
+    for (let y = 0; y < MASK_SIZE; y += 1) {
+      for (let x = 0; x < MASK_SIZE; x += 1) {
+        const index = y * MASK_SIZE + x;
+        if (!routeMask[index]) {
+          continue;
+        }
+
+        let edge = false;
+        for (let oy = -1; oy <= 1 && !edge; oy += 1) {
+          for (let ox = -1; ox <= 1; ox += 1) {
+            if (ox === 0 && oy === 0) {
+              continue;
+            }
+            const nx = x + ox;
+            const ny = y + oy;
+            if (nx < 0 || nx >= MASK_SIZE || ny < 0 || ny >= MASK_SIZE || !routeMask[ny * MASK_SIZE + nx]) {
+              edge = true;
+              break;
+            }
+          }
+        }
+
+        edgeMask[index] = edge ? 1 : 0;
+      }
+    }
+
+    return edgeMask;
   }
 
   function drawSourceImage(ctx, image) {
@@ -1001,7 +1037,10 @@
   }
 
   function findConnectorRoute(start, target) {
-    if (isConnectorSafe(start, target)) {
+    const connectorDistance = distance(start, target);
+    const shortHop = Math.max(MAX_STEP * 5, state.ballDiameter * 1.25);
+
+    if (connectorDistance <= shortHop && isConnectorSafe(start, target)) {
       return [start, target];
     }
 
@@ -1154,16 +1193,49 @@
           }
         }
 
-        const tentative = gScore[current] + cost;
+        const tentative = gScore[current] + cost * travelCost(next);
         if (tentative < gScore[next]) {
           cameFrom[next] = current;
           gScore[next] = tentative;
-          heapPush(heap, next, tentative + heuristic(next, targetX, targetY));
+          heapPush(heap, next, tentative + heuristic(next, targetX, targetY) * 0.7);
         }
       }
     }
 
     return null;
+  }
+
+  function travelCost(index) {
+    if (state.drawnMask[index]) {
+      return 0.12;
+    }
+
+    const x = index % MASK_SIZE;
+    const y = Math.floor(index / MASK_SIZE);
+
+    for (let radius = 1; radius <= 2; radius += 1) {
+      for (let oy = -radius; oy <= radius; oy += 1) {
+        for (let ox = -radius; ox <= radius; ox += 1) {
+          if (Math.abs(ox) !== radius && Math.abs(oy) !== radius) {
+            continue;
+          }
+          const nx = x + ox;
+          const ny = y + oy;
+          if (nx < 0 || nx >= MASK_SIZE || ny < 0 || ny >= MASK_SIZE) {
+            continue;
+          }
+          if (state.drawnMask[ny * MASK_SIZE + nx]) {
+            return 0.35 + radius * 0.2;
+          }
+        }
+      }
+    }
+
+    if (state.routeEdgeMask[index]) {
+      return 0.75;
+    }
+
+    return 18;
   }
 
   function heuristic(index, targetX, targetY) {
@@ -1257,6 +1329,29 @@
     const last = path[path.length - 1];
     if (!last || distanceSquared(last, p) > 0.0000004 || last.kind !== p.kind) {
       path.push(p);
+      markDrawnPoint(p);
+    }
+  }
+
+  function markDrawnPoint(p) {
+    const cell = worldToMaskCell(p.x, p.y);
+    if (!cell) {
+      return;
+    }
+
+    const radius = p.kind === "connector" ? 1 : 2;
+    for (let oy = -radius; oy <= radius; oy += 1) {
+      for (let ox = -radius; ox <= radius; ox += 1) {
+        const nx = cell.x + ox;
+        const ny = cell.y + oy;
+        if (nx < 0 || nx >= MASK_SIZE || ny < 0 || ny >= MASK_SIZE) {
+          continue;
+        }
+        const index = ny * MASK_SIZE + nx;
+        if (state.routeMask[index]) {
+          state.drawnMask[index] = 1;
+        }
+      }
     }
   }
 

@@ -14,7 +14,7 @@ The app uses the mask for fill decisions because that is more dependable for ras
 
 ## Ball Size
 
-The `Ball size` control is measured in millimeters. Set `Table dia.` to your Dune Weaver table diameter so the app can convert the physical ball size into the normalized `.thr` geometry. The setting changes the preview ball and clips generated fill paths so the ball footprint stays inside the uploaded logo mask.
+The `Ball size` control is measured in millimeters. Set `Table dia.` to your Dune Weaver table diameter, defaulting to 250 mm, so the app can convert the physical ball size into the normalized `.thr` geometry. The setting changes the preview ball and clips generated fill paths so the ball footprint stays inside the uploaded logo mask.
 
 Connectors are routed through the ball-aware mask whenever possible. This keeps travel moves inside the same border or island instead of drawing long diagonal lines through open areas. If two completely separate islands must be connected in one continuous `.thr` file, one short bridge may still be unavoidable.
 
