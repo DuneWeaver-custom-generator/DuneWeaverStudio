@@ -7,10 +7,16 @@ Static web app for turning a logo/image into a filled `.thr` path.
 1. Load a PNG, JPEG, WEBP, or SVG.
 2. Convert the image into a binary mask using transparency or brightness thresholding.
 3. Trace that mask into vector contours for boundary passes and optional SVG export.
-4. Generate interior ball motion from the mask with wave, image pattern, sweep, orbit, or spiral fills.
+4. Generate interior ball motion from the mask with contour, maze, wave, image pattern, sweep, orbit, or spiral fills.
 5. Convert the final continuous path into Theta Rho `.thr` rows.
 
 The app uses the mask for fill decisions because that is more dependable for raster logos than forcing every image through SVG first. The SVG trace export is included as a checkpoint and reusable vector artifact.
+
+## Shape-Following Fills
+
+`Inset contour` creates nested rings from the ball-aware logo mask, so the motion follows the uploaded shape instead of cutting across it. This is usually the cleanest choice for bold logos and block lettering.
+
+`Maze fill` builds a continuous grid walk inside each logo island. It gives the filled area a deliberate maze texture while avoiding the long scanline bridges that can make wave fills look scratched.
 
 ## Image Pattern Mode
 

@@ -83,7 +83,7 @@
     threshold: 150,
     invert: false,
     shapeScale: 0.86,
-    fillMode: "waves",
+    fillMode: "contour",
     clearQuality: "pro",
     spacing: 0.044,
     amplitude: 0.022,
@@ -715,6 +715,57 @@
     return out;
   }
 
+  function erodeMask(mask, radius) {
+    const out = new Uint8Array(mask.length);
+    const offsets = circularOffsets(radius);
+
+    for (let y = 0; y < MASK_SIZE; y += 1) {
+      for (let x = 0; x < MASK_SIZE; x += 1) {
+        const index = y * MASK_SIZE + x;
+        if (!mask[index]) {
+          continue;
+        }
+
+        let keep = true;
+        for (const offset of offsets) {
+          const nx = x + offset.x;
+          const ny = y + offset.y;
+          if (nx < 0 || nx >= MASK_SIZE || ny < 0 || ny >= MASK_SIZE || !mask[ny * MASK_SIZE + nx]) {
+            keep = false;
+            break;
+          }
+        }
+
+        out[index] = keep ? 1 : 0;
+      }
+    }
+
+    return out;
+  }
+
+  function circularOffsets(radius) {
+    const offsets = [];
+    const r2 = radius * radius;
+
+    for (let y = -radius; y <= radius; y += 1) {
+      for (let x = -radius; x <= radius; x += 1) {
+        if (x * x + y * y <= r2) {
+          offsets.push({ x, y });
+        }
+      }
+    }
+
+    return offsets;
+  }
+
+  function maskPixelCount(mask) {
+    let count = 0;
+    for (let i = 0; i < mask.length; i += 1) {
+      count += mask[i];
+    }
+    return count;
+  }
+
   function createMaskPreviewCanvas(mask) {
     const canvas = document.createElement("canvas");
     canvas.width = MASK_SIZE;
@@ -742,6 +793,12 @@
     }
     if (state.fillMode === "clearOut") {
       return generateClearSegments("out");
+    }
+    if (state.fillMode === "contour") {
+      return generateContourSegments();
+    }
+    if (state.fillMode === "maze") {
+      return generateMazeSegments();
     }
     if (state.fillMode === "sweep") {
       return generateSweepSegments();
@@ -797,6 +854,161 @@
     }
 
     return segments;
+  }
+
+  function generateContourSegments() {
+    const segments = [];
+    let current = new Uint8Array(state.routeMask);
+    const insetPixels = Math.max(1, Math.round((state.spacing / Math.max(0.01, activeMaskScale())) * (MASK_SIZE - 1) * 0.5));
+    const maxLayers = clamp(Math.ceil(MASK_SIZE / insetPixels), 4, 80);
+
+    for (let layer = 0; layer < maxLayers; layer += 1) {
+      const layerSegments = outlineSegmentsForMask(current, 0.0025);
+      if (!layerSegments.length) {
+        break;
+      }
+
+      segments.push(...layerSegments);
+      current = erodeMask(current, insetPixels);
+
+      if (maskPixelCount(current) < 4) {
+        break;
+      }
+    }
+
+    return orderSegmentsCenterOut(segments, point(0, 0, "fill"));
+  }
+
+  function generateMazeSegments() {
+    const scale = activeMaskScale();
+    const cellStep = Math.max(state.spacing * 1.15, state.ballDiameter * 1.35, 0.026);
+    const gridCount = Math.round(clamp(Math.ceil((scale * 2) / cellStep) + 1, 8, 74));
+    const step = (scale * 2) / Math.max(1, gridCount - 1);
+    const cells = new Map();
+
+    for (let gy = 0; gy < gridCount; gy += 1) {
+      const y = -scale + gy * step;
+      for (let gx = 0; gx < gridCount; gx += 1) {
+        const x = -scale + gx * step;
+        if (!isInside(x, y)) {
+          continue;
+        }
+
+        const label = routeLabelForPoint({ x, y });
+        if (label <= 0) {
+          continue;
+        }
+
+        const key = mazeKey(gx, gy);
+        cells.set(key, { gx, gy, x, y, key, label, neighbors: [] });
+      }
+    }
+
+    cells.forEach((cell) => {
+      const candidates = [
+        cells.get(mazeKey(cell.gx + 1, cell.gy)),
+        cells.get(mazeKey(cell.gx - 1, cell.gy)),
+        cells.get(mazeKey(cell.gx, cell.gy + 1)),
+        cells.get(mazeKey(cell.gx, cell.gy - 1)),
+      ];
+
+      candidates.forEach((candidate) => {
+        if (candidate && candidate.label === cell.label && isConnectorSafe(cell, candidate)) {
+          cell.neighbors.push(candidate);
+        }
+      });
+    });
+
+    const remaining = new Set(cells.keys());
+    const segments = [];
+
+    while (remaining.size > 0) {
+      const start = nearestMazeCellToCenter(remaining, cells);
+      if (!start) {
+        break;
+      }
+
+      const segment = walkMazeComponent(start, remaining);
+      if (segment.length > 1) {
+        segments.push(segment);
+      }
+    }
+
+    return segments;
+  }
+
+  function mazeKey(x, y) {
+    return `${x},${y}`;
+  }
+
+  function nearestMazeCellToCenter(keys, cells) {
+    let best = null;
+    let bestDistance = Infinity;
+
+    keys.forEach((key) => {
+      const cell = cells.get(key);
+      if (!cell) {
+        return;
+      }
+
+      const d = cell.x * cell.x + cell.y * cell.y;
+      if (d < bestDistance) {
+        best = cell;
+        bestDistance = d;
+      }
+    });
+
+    return best;
+  }
+
+  function walkMazeComponent(start, remaining) {
+    const path = [point(start.x, start.y, "fill")];
+    const stack = [start];
+    remaining.delete(start.key);
+
+    while (stack.length > 0) {
+      const current = stack[stack.length - 1];
+      const next = chooseMazeNeighbor(current, remaining);
+
+      if (next) {
+        remaining.delete(next.key);
+        stack.push(next);
+        path.push(point(next.x, next.y, "fill"));
+        continue;
+      }
+
+      stack.pop();
+      if (stack.length > 0) {
+        const backtrack = stack[stack.length - 1];
+        path.push(point(backtrack.x, backtrack.y, "fill"));
+      }
+    }
+
+    return simplifyPolyline(path, Math.max(0.001, state.spacing * 0.12));
+  }
+
+  function chooseMazeNeighbor(cell, remaining) {
+    let best = null;
+    let bestScore = Infinity;
+
+    cell.neighbors.forEach((neighbor) => {
+      if (!remaining.has(neighbor.key)) {
+        return;
+      }
+
+      const score = mazeHash(cell.gx, cell.gy, neighbor.gx, neighbor.gy);
+      if (score < bestScore) {
+        best = neighbor;
+        bestScore = score;
+      }
+    });
+
+    return best;
+  }
+
+  function mazeHash(ax, ay, bx, by) {
+    const seed = ax * 12.9898 + ay * 78.233 + bx * 37.719 + by * 19.371 + state.frequency * 4.11;
+    return Math.abs(Math.sin(seed) * 43758.5453) % 1;
   }
 
   function generateOrbitSegments() {
@@ -969,6 +1181,10 @@
   }
 
   function extractOutlineSegments() {
+    return outlineSegmentsForMask(state.mask, 0.003);
+  }
+
+  function outlineSegmentsForMask(mask, tolerance) {
     const pairsByCase = {
       1: [["L", "T"]],
       2: [["T", "R"]],
@@ -996,10 +1212,10 @@
 
     for (let y = 0; y < MASK_SIZE - 1; y += 1) {
       for (let x = 0; x < MASK_SIZE - 1; x += 1) {
-        const tl = state.mask[y * MASK_SIZE + x] ? 1 : 0;
-        const tr = state.mask[y * MASK_SIZE + x + 1] ? 1 : 0;
-        const br = state.mask[(y + 1) * MASK_SIZE + x + 1] ? 1 : 0;
-        const bl = state.mask[(y + 1) * MASK_SIZE + x] ? 1 : 0;
+        const tl = mask[y * MASK_SIZE + x] ? 1 : 0;
+        const tr = mask[y * MASK_SIZE + x + 1] ? 1 : 0;
+        const br = mask[(y + 1) * MASK_SIZE + x + 1] ? 1 : 0;
+        const bl = mask[(y + 1) * MASK_SIZE + x] ? 1 : 0;
         const code = tl | (tr << 1) | (br << 2) | (bl << 3);
         const pairs = pairsByCase[code];
 
@@ -1017,7 +1233,7 @@
     }
 
     return chainRawSegments(rawSegments)
-      .flatMap((chain) => splitByTable(simplifyPolyline(chain.map(gridToWorld), 0.003)))
+      .flatMap((chain) => splitByTable(simplifyPolyline(chain.map(gridToWorld), tolerance)))
       .filter((segment) => segment.length > 4 && totalPathLength(segment) > 0.02);
   }
 
@@ -1435,9 +1651,11 @@
   }
 
   function connectorKindForPoint(p) {
-    return (state.fillMode === "imagePattern" || usesCenterOutFillOrder()) && isDrawnNearPoint(p)
-      ? "retrace"
-      : "connector";
+    return usesRetraceConnectors() && isDrawnNearPoint(p) ? "retrace" : "connector";
+  }
+
+  function usesRetraceConnectors() {
+    return state.fillMode === "imagePattern" || state.fillMode === "contour" || state.fillMode === "maze" || usesCenterOutFillOrder();
   }
 
   function isDrawnNearPoint(p) {
