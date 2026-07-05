@@ -22,7 +22,7 @@ Image pattern mode also adds one clipped concentric pass through the open sand b
 
 The `Ball size` control is measured in millimeters. Set `Table dia.` to your Dune Weaver table diameter, defaulting to 250 mm, so the app can convert the physical ball size into the normalized `.thr` geometry. The setting changes the preview ball and clips generated fill paths so the ball footprint stays inside the uploaded logo mask.
 
-Connectors are routed through the ball-aware mask whenever possible. Wave and sweep fills are stitched island-by-island: the app finishes one connected part of the logo, runs its outline pass, then moves to the next connected part. This avoids the repeated cross-logo travel moves that make filled logos look scratched up. If two completely separate islands must be connected in one continuous `.thr` file, one short bridge may still be unavoidable.
+Connectors are routed through the ball-aware mask whenever possible. Wave and sweep fills are stitched island-by-island, with the interior strokes ordered from the center outward before the outline pass. Reused travel over an existing groove is treated as a retrace in the preview, which keeps the visible connector lines focused on unavoidable bridges. If two completely separate islands must be connected in one continuous `.thr` file, one short bridge may still be unavoidable.
 
 ## Clear Modes
 

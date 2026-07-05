@@ -1218,9 +1218,11 @@
     while (fillGroups.length > 0) {
       const selection = selectNearestGroup(path, fillGroups);
       const group = fillGroups.splice(selection.index, 1)[0];
-      const segments = cloneSegments(group.segments);
+      let segments = cloneSegments(group.segments);
 
-      if (selection.reverse) {
+      if (usesCenterOutFillOrder()) {
+        segments = orderSegmentsCenterOut(segments, path.length > 0 ? path[path.length - 1] : point(0, 0, "fill"));
+      } else if (selection.reverse) {
         reverseSegmentSequence(segments);
       }
 
@@ -1251,6 +1253,81 @@
     for (let pass = 0; pass < state.outlinePasses; pass += 1) {
       appendChains(path, cloneSegments(segments), "outline");
     }
+  }
+
+  function usesCenterOutFillOrder() {
+    return state.fillMode === "waves" || state.fillMode === "sweep";
+  }
+
+  function orderSegmentsCenterOut(sourceSegments, startPoint) {
+    const ringSize = Math.max(state.spacing * 1.6, state.ballDiameter * 2, 0.035);
+    const rings = new Map();
+
+    sourceSegments.forEach((segment) => {
+      if (segment.length < 2) {
+        return;
+      }
+
+      const center = segmentCenter(segment);
+      const ring = Math.floor(Math.hypot(center.x, center.y) / ringSize);
+      if (!rings.has(ring)) {
+        rings.set(ring, []);
+      }
+      rings.get(ring).push(segment);
+    });
+
+    const ordered = [];
+    let cursor = startPoint || point(0, 0, "fill");
+
+    Array.from(rings.keys()).sort((a, b) => a - b).forEach((ring) => {
+      const queue = rings.get(ring);
+
+      while (queue.length > 0) {
+        let bestIndex = 0;
+        let bestReverse = false;
+        let bestDistance = Infinity;
+
+        for (let i = 0; i < queue.length; i += 1) {
+          const segment = queue[i];
+          const startDistance = distanceSquared(cursor, segment[0]);
+          const endDistance = distanceSquared(cursor, segment[segment.length - 1]);
+
+          if (startDistance < bestDistance) {
+            bestIndex = i;
+            bestReverse = false;
+            bestDistance = startDistance;
+          }
+
+          if (endDistance < bestDistance) {
+            bestIndex = i;
+            bestReverse = true;
+            bestDistance = endDistance;
+          }
+        }
+
+        const next = queue.splice(bestIndex, 1)[0];
+        if (bestReverse) {
+          next.reverse();
+        }
+
+        ordered.push(next);
+        cursor = next[next.length - 1];
+      }
+    });
+
+    return ordered;
+  }
+
+  function segmentCenter(segment) {
+    let x = 0;
+    let y = 0;
+
+    segment.forEach((p) => {
+      x += p.x;
+      y += p.y;
+    });
+
+    return { x: x / segment.length, y: y / segment.length };
   }
 
   function groupSegmentsByRouteLabel(segments) {
@@ -1358,7 +1435,9 @@
   }
 
   function connectorKindForPoint(p) {
-    return state.fillMode === "imagePattern" && isDrawnNearPoint(p) ? "retrace" : "connector";
+    return (state.fillMode === "imagePattern" || usesCenterOutFillOrder()) && isDrawnNearPoint(p)
+      ? "retrace"
+      : "connector";
   }
 
   function isDrawnNearPoint(p) {
