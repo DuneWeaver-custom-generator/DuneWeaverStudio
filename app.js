@@ -32,6 +32,8 @@
     "outlineValue",
     "rhoInput",
     "rhoValue",
+    "tableDiameterInput",
+    "tableDiameterValue",
     "ballSizeInput",
     "ballSizeValue",
     "startCenterInput",
@@ -62,6 +64,8 @@
     sourceCanvas: null,
     objectUrl: "",
     mask: new Uint8Array(MASK_SIZE * MASK_SIZE),
+    routeMask: new Uint8Array(MASK_SIZE * MASK_SIZE),
+    routeLabels: new Int32Array(MASK_SIZE * MASK_SIZE),
     maskPreviewCanvas: null,
     path: [],
     thr: "",
@@ -81,7 +85,9 @@
     angleRad: 0,
     outlinePasses: 1,
     rhoMax: 0.96,
-    ballDiameter: 0.019,
+    tableDiameterMm: 500,
+    ballSizeMm: 10,
+    ballDiameter: 0.02,
     startCenter: true,
     endCenter: true,
     showMask: true,
@@ -120,6 +126,7 @@
       "angleInput",
       "outlineInput",
       "rhoInput",
+      "tableDiameterInput",
       "ballSizeInput",
       "startCenterInput",
       "endCenterInput",
@@ -332,7 +339,9 @@
     state.angleRad = (Number(el.angleInput.value) * Math.PI) / 180;
     state.outlinePasses = Number(el.outlineInput.value);
     state.rhoMax = Number(el.rhoInput.value) / 100;
-    state.ballDiameter = Number(el.ballSizeInput.value) / 1000;
+    state.tableDiameterMm = Number(el.tableDiameterInput.value);
+    state.ballSizeMm = Number(el.ballSizeInput.value);
+    state.ballDiameter = state.ballSizeMm / Math.max(1, state.tableDiameterMm);
     state.startCenter = el.startCenterInput.checked;
     state.endCenter = el.endCenterInput.checked;
     state.showMask = el.maskPreviewInput.checked;
@@ -346,7 +355,8 @@
     el.angleValue.textContent = `${Math.round((state.angleRad * 180) / Math.PI)} deg`;
     el.outlineValue.textContent = String(state.outlinePasses);
     el.rhoValue.textContent = state.rhoMax.toFixed(2);
-    el.ballSizeValue.textContent = `${(state.ballDiameter * 100).toFixed(1)}%`;
+    el.tableDiameterValue.textContent = `${Math.round(state.tableDiameterMm)} mm`;
+    el.ballSizeValue.textContent = `${formatMm(state.ballSizeMm)} mm`;
   }
 
   function rebuildMask() {
@@ -390,7 +400,99 @@
     }
 
     state.mask = cleanMask(mask);
+    state.routeMask = createRouteMask(state.mask);
+    state.routeLabels = labelRouteComponents(state.routeMask);
     state.maskPreviewCanvas = createMaskPreviewCanvas(state.mask);
+  }
+
+  function createRouteMask(mask) {
+    const routeMask = new Uint8Array(mask.length);
+    const pixelRadius = Math.max(0, Math.ceil((state.ballDiameter / Math.max(0.01, state.shapeScale)) * (MASK_SIZE - 1) * 0.5));
+
+    if (pixelRadius <= 1) {
+      routeMask.set(mask);
+      return routeMask;
+    }
+
+    const samples = pixelRadius > 5 ? 16 : 8;
+    const offsets = [{ x: 0, y: 0 }];
+
+    for (let i = 0; i < samples; i += 1) {
+      const angle = (i / samples) * TWO_PI;
+      offsets.push({
+        x: Math.round(Math.cos(angle) * pixelRadius),
+        y: Math.round(Math.sin(angle) * pixelRadius),
+      });
+    }
+
+    for (let y = 0; y < MASK_SIZE; y += 1) {
+      for (let x = 0; x < MASK_SIZE; x += 1) {
+        let allowed = true;
+        for (const offset of offsets) {
+          const nx = x + offset.x;
+          const ny = y + offset.y;
+          if (nx < 0 || nx >= MASK_SIZE || ny < 0 || ny >= MASK_SIZE || !mask[ny * MASK_SIZE + nx]) {
+            allowed = false;
+            break;
+          }
+        }
+        routeMask[y * MASK_SIZE + x] = allowed ? 1 : 0;
+      }
+    }
+
+    return routeMask;
+  }
+
+  function labelRouteComponents(routeMask) {
+    const labels = new Int32Array(routeMask.length);
+    const queue = new Int32Array(routeMask.length);
+    let label = 0;
+    const directions = [
+      [-1, 0],
+      [1, 0],
+      [0, -1],
+      [0, 1],
+      [-1, -1],
+      [1, -1],
+      [-1, 1],
+      [1, 1],
+    ];
+
+    for (let start = 0; start < routeMask.length; start += 1) {
+      if (!routeMask[start] || labels[start]) {
+        continue;
+      }
+
+      label += 1;
+      let head = 0;
+      let tail = 0;
+      queue[tail] = start;
+      tail += 1;
+      labels[start] = label;
+
+      while (head < tail) {
+        const current = queue[head];
+        head += 1;
+        const x = current % MASK_SIZE;
+        const y = Math.floor(current / MASK_SIZE);
+
+        for (const [dx, dy] of directions) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || nx >= MASK_SIZE || ny < 0 || ny >= MASK_SIZE) {
+            continue;
+          }
+          const next = ny * MASK_SIZE + nx;
+          if (routeMask[next] && !labels[next]) {
+            labels[next] = label;
+            queue[tail] = next;
+            tail += 1;
+          }
+        }
+      }
+    }
+
+    return labels;
   }
 
   function drawSourceImage(ctx, image) {
@@ -593,37 +695,34 @@
       return false;
     }
 
-    if (!isMaskPointInside(x, y)) {
+    const cell = worldToMaskCell(x, y);
+    if (!cell) {
       return false;
     }
 
-    const ballRadius = state.ballDiameter;
-    if (ballRadius <= 0.004) {
-      return true;
-    }
-
-    const samples = ballRadius > 0.035 ? 12 : 8;
-    for (let i = 0; i < samples; i += 1) {
-      const angle = (i / samples) * TWO_PI;
-      if (!isMaskPointInside(x + Math.cos(angle) * ballRadius, y + Math.sin(angle) * ballRadius)) {
-        return false;
-      }
-    }
-
-    return true;
+    return state.routeMask[cell.index] === 1;
   }
 
-  function isMaskPointInside(x, y) {
+  function worldToMaskCell(x, y) {
     const sx = x / state.shapeScale;
     const sy = y / state.shapeScale;
 
     if (sx < -1 || sx > 1 || sy < -1 || sy > 1) {
-      return false;
+      return null;
     }
 
-    const gx = Math.round((sx * 0.5 + 0.5) * (MASK_SIZE - 1));
-    const gy = Math.round((sy * 0.5 + 0.5) * (MASK_SIZE - 1));
-    return state.mask[gy * MASK_SIZE + gx] === 1;
+    const gx = clamp(Math.round((sx * 0.5 + 0.5) * (MASK_SIZE - 1)), 0, MASK_SIZE - 1);
+    const gy = clamp(Math.round((sy * 0.5 + 0.5) * (MASK_SIZE - 1)), 0, MASK_SIZE - 1);
+    return { x: gx, y: gy, index: gy * MASK_SIZE + gx };
+  }
+
+  function maskCellToWorld(index) {
+    const x = index % MASK_SIZE;
+    const y = Math.floor(index / MASK_SIZE);
+    return {
+      x: ((x / (MASK_SIZE - 1)) * 2 - 1) * state.shapeScale,
+      y: ((y / (MASK_SIZE - 1)) * 2 - 1) * state.shapeScale,
+    };
   }
 
   function inTable(x, y) {
@@ -831,12 +930,18 @@
 
     while (segments.length > 0) {
       const current = path.length > 0 ? path[path.length - 1] : point(0, 0, kind);
+      const currentLabel = routeLabelForPoint(current);
+      const sameComponentAvailable = currentLabel > 0 && segments.some((segment) => routeLabelForSegment(segment) === currentLabel);
       let bestIndex = 0;
       let bestReverse = false;
       let bestDistance = Infinity;
 
       for (let i = 0; i < segments.length; i += 1) {
         const segment = segments[i];
+        if (sameComponentAvailable && routeLabelForSegment(segment) !== currentLabel) {
+          continue;
+        }
+
         const startDistance = distanceSquared(current, segment[0]);
         const endDistance = distanceSquared(current, segment[segment.length - 1]);
 
@@ -873,6 +978,16 @@
     }
 
     const start = path[path.length - 1];
+    const routed = findConnectorRoute(start, target);
+    if (routed && routed.length > 1) {
+      routed.slice(1).forEach((p) => appendPoint(path, point(p.x, p.y, "connector")));
+      return;
+    }
+
+    appendLineConnector(path, start, target);
+  }
+
+  function appendLineConnector(path, start, target) {
     const length = distance(start, target);
     const steps = Math.max(1, Math.ceil(length / MAX_STEP));
 
@@ -883,6 +998,259 @@
         point(start.x + (target.x - start.x) * t, start.y + (target.y - start.y) * t, "connector"),
       );
     }
+  }
+
+  function findConnectorRoute(start, target) {
+    if (isConnectorSafe(start, target)) {
+      return [start, target];
+    }
+
+    const startCell = nearestRouteCell(start);
+    const targetCell = nearestRouteCell(target);
+
+    if (!startCell || !targetCell || startCell.label !== targetCell.label) {
+      return null;
+    }
+
+    const cellRoute = aStarRoute(startCell.index, targetCell.index);
+    if (!cellRoute || cellRoute.length < 2) {
+      return null;
+    }
+
+    const route = [start];
+    simplifyCellRoute(cellRoute).forEach((index) => route.push(maskCellToWorld(index)));
+    route.push(target);
+    return route;
+  }
+
+  function isConnectorSafe(start, target) {
+    const length = distance(start, target);
+    const steps = Math.max(1, Math.ceil(length / (MAX_STEP * 1.5)));
+
+    for (let i = 0; i <= steps; i += 1) {
+      const t = i / steps;
+      if (!isInside(start.x + (target.x - start.x) * t, start.y + (target.y - start.y) * t)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  function nearestRouteCell(p) {
+    const cell = worldToMaskCell(p.x, p.y);
+    if (!cell) {
+      return null;
+    }
+
+    if (state.routeMask[cell.index]) {
+      return { index: cell.index, label: state.routeLabels[cell.index] };
+    }
+
+    const maxRadius = Math.ceil(Math.max(4, (state.ballDiameter / Math.max(0.01, state.shapeScale)) * MASK_SIZE));
+    let best = null;
+    let bestDistance = Infinity;
+
+    for (let radius = 1; radius <= maxRadius; radius += 1) {
+      for (let y = cell.y - radius; y <= cell.y + radius; y += 1) {
+        for (let x = cell.x - radius; x <= cell.x + radius; x += 1) {
+          if (x < 0 || x >= MASK_SIZE || y < 0 || y >= MASK_SIZE) {
+            continue;
+          }
+          if (Math.abs(x - cell.x) !== radius && Math.abs(y - cell.y) !== radius) {
+            continue;
+          }
+          const index = y * MASK_SIZE + x;
+          if (!state.routeMask[index]) {
+            continue;
+          }
+          const d = (x - cell.x) * (x - cell.x) + (y - cell.y) * (y - cell.y);
+          if (d < bestDistance) {
+            best = { index, label: state.routeLabels[index] };
+            bestDistance = d;
+          }
+        }
+      }
+      if (best) {
+        return best;
+      }
+    }
+
+    return null;
+  }
+
+  function routeLabelForPoint(p) {
+    const cell = nearestRouteCell(p);
+    return cell ? cell.label : 0;
+  }
+
+  function routeLabelForSegment(segment) {
+    const middle = segment[Math.floor(segment.length / 2)] || segment[0];
+    return routeLabelForPoint(middle);
+  }
+
+  function aStarRoute(startIndex, targetIndex) {
+    if (startIndex === targetIndex) {
+      return [startIndex];
+    }
+
+    const total = MASK_SIZE * MASK_SIZE;
+    const gScore = new Float32Array(total);
+    const cameFrom = new Int32Array(total);
+    const closed = new Uint8Array(total);
+    gScore.fill(Infinity);
+    cameFrom.fill(-1);
+
+    const targetX = targetIndex % MASK_SIZE;
+    const targetY = Math.floor(targetIndex / MASK_SIZE);
+    const heap = [];
+    gScore[startIndex] = 0;
+    heapPush(heap, startIndex, heuristic(startIndex, targetX, targetY));
+
+    const directions = [
+      [-1, 0, 1],
+      [1, 0, 1],
+      [0, -1, 1],
+      [0, 1, 1],
+      [-1, -1, Math.SQRT2],
+      [1, -1, Math.SQRT2],
+      [-1, 1, Math.SQRT2],
+      [1, 1, Math.SQRT2],
+    ];
+    const targetLabel = state.routeLabels[targetIndex];
+    let expanded = 0;
+    const maxExpanded = total;
+
+    while (heap.length && expanded < maxExpanded) {
+      const current = heapPop(heap);
+      if (closed[current]) {
+        continue;
+      }
+      if (current === targetIndex) {
+        return reconstructRoute(cameFrom, current);
+      }
+
+      closed[current] = 1;
+      expanded += 1;
+      const cx = current % MASK_SIZE;
+      const cy = Math.floor(current / MASK_SIZE);
+
+      for (const [dx, dy, cost] of directions) {
+        const nx = cx + dx;
+        const ny = cy + dy;
+        if (nx < 0 || nx >= MASK_SIZE || ny < 0 || ny >= MASK_SIZE) {
+          continue;
+        }
+
+        const next = ny * MASK_SIZE + nx;
+        if (closed[next] || state.routeLabels[next] !== targetLabel) {
+          continue;
+        }
+        if (dx !== 0 && dy !== 0) {
+          const sideA = cy * MASK_SIZE + nx;
+          const sideB = ny * MASK_SIZE + cx;
+          if (state.routeLabels[sideA] !== targetLabel || state.routeLabels[sideB] !== targetLabel) {
+            continue;
+          }
+        }
+
+        const tentative = gScore[current] + cost;
+        if (tentative < gScore[next]) {
+          cameFrom[next] = current;
+          gScore[next] = tentative;
+          heapPush(heap, next, tentative + heuristic(next, targetX, targetY));
+        }
+      }
+    }
+
+    return null;
+  }
+
+  function heuristic(index, targetX, targetY) {
+    const x = index % MASK_SIZE;
+    const y = Math.floor(index / MASK_SIZE);
+    return Math.hypot(x - targetX, y - targetY);
+  }
+
+  function reconstructRoute(cameFrom, current) {
+    const route = [current];
+    while (cameFrom[current] !== -1) {
+      current = cameFrom[current];
+      route.push(current);
+    }
+    route.reverse();
+    return route;
+  }
+
+  function simplifyCellRoute(route) {
+    if (route.length <= 2) {
+      return route;
+    }
+
+    const simplified = [route[0]];
+    let lastDx = 0;
+    let lastDy = 0;
+
+    for (let i = 1; i < route.length; i += 1) {
+      const prev = route[i - 1];
+      const current = route[i];
+      const dx = Math.sign((current % MASK_SIZE) - (prev % MASK_SIZE));
+      const dy = Math.sign(Math.floor(current / MASK_SIZE) - Math.floor(prev / MASK_SIZE));
+
+      if (i > 1 && (dx !== lastDx || dy !== lastDy)) {
+        simplified.push(prev);
+      }
+
+      lastDx = dx;
+      lastDy = dy;
+    }
+
+    simplified.push(route[route.length - 1]);
+    return simplified;
+  }
+
+  function heapPush(heap, index, priority) {
+    heap.push({ index, priority });
+    let current = heap.length - 1;
+
+    while (current > 0) {
+      const parent = Math.floor((current - 1) / 2);
+      if (heap[parent].priority <= priority) {
+        break;
+      }
+      heap[current] = heap[parent];
+      current = parent;
+    }
+
+    heap[current] = { index, priority };
+  }
+
+  function heapPop(heap) {
+    const top = heap[0].index;
+    const last = heap.pop();
+
+    if (heap.length && last) {
+      let current = 0;
+      while (true) {
+        const left = current * 2 + 1;
+        const right = left + 1;
+        if (left >= heap.length) {
+          break;
+        }
+        let child = left;
+        if (right < heap.length && heap[right].priority < heap[left].priority) {
+          child = right;
+        }
+        if (heap[child].priority >= last.priority) {
+          break;
+        }
+        heap[current] = heap[child];
+        current = child;
+      }
+      heap[current] = last;
+    }
+
+    return top;
   }
 
   function appendPoint(path, p) {
@@ -988,6 +1356,10 @@
     const minutes = Math.floor(rounded / 60);
     const rest = String(rounded % 60).padStart(2, "0");
     return `${minutes}:${rest}`;
+  }
+
+  function formatMm(value) {
+    return Number.isInteger(value) ? String(value) : value.toFixed(1);
   }
 
   function setPlaying(isPlaying) {
