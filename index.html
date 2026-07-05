@@ -6,7 +6,7 @@
     <title>Dune Weaver THR Studio</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
-  <body>
+  <body data-theme="dark">
     <main class="shell">
       <aside class="controls" aria-label="Generator controls">
         <div class="brand">
@@ -14,9 +14,14 @@
             <p class="eyebrow">Dune Weaver</p>
             <h1>THR Studio</h1>
           </div>
-          <button class="icon-button" id="resetButton" type="button" title="Reset sample" aria-label="Reset sample">
-            &#8635;
-          </button>
+          <div class="brand-actions">
+            <button class="icon-button" id="themeButton" type="button" title="Switch to light mode" aria-label="Switch to light mode">
+              &#9788;
+            </button>
+            <button class="icon-button" id="resetButton" type="button" title="Reset sample" aria-label="Reset sample">
+              &#8635;
+            </button>
+          </div>
         </div>
 
         <section class="panel source-panel">
@@ -57,6 +62,16 @@
               <option value="sweep">Flatten sweep</option>
               <option value="orbit">Orbit polish</option>
               <option value="spiral">Spiral polish</option>
+              <option value="clearIn">Clear from in</option>
+              <option value="clearOut">Clear from out</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Clear quality</span>
+            <select id="clearQualityInput">
+              <option value="standard">Standard</option>
+              <option value="pro" selected>Pro</option>
+              <option value="ultra">Ultra</option>
             </select>
           </label>
           <label class="range-row">

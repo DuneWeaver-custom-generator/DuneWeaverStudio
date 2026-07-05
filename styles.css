@@ -1,4 +1,32 @@
 :root {
+  color-scheme: dark;
+  --ink: #eef6f1;
+  --muted: #9fafa8;
+  --panel: #12201f;
+  --paper: #0b1213;
+  --line: #2c403e;
+  --deep: #e5f3ed;
+  --teal: #35abb5;
+  --clay: #e28a62;
+  --gold: #d7ad55;
+  --sand: #bda77c;
+  --white: #182827;
+  --label: #d8e7e1;
+  --body-bg: #0b1112;
+  --controls-bg: rgba(11, 18, 19, 0.9);
+  --panel-border: rgba(236, 246, 240, 0.12);
+  --drop-bg: rgba(53, 171, 181, 0.08);
+  --secondary-bg: #203230;
+  --secondary-bg-hover: #2a403e;
+  --canvas-bg: #101819;
+  --hud-bg: rgba(12, 20, 21, 0.82);
+  --shadow: 0 18px 48px rgba(0, 0, 0, 0.36);
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
+body[data-theme="light"] {
   color-scheme: light;
   --ink: #172124;
   --muted: #6c7672;
@@ -8,13 +36,18 @@
   --deep: #17363a;
   --teal: #0b6670;
   --clay: #b85f3d;
-  --gold: #d7ad55;
   --sand: #e5d7bd;
   --white: #ffffff;
+  --label: #334144;
+  --body-bg: #ece7dc;
+  --controls-bg: rgba(251, 250, 246, 0.88);
+  --panel-border: rgba(23, 33, 36, 0.1);
+  --drop-bg: rgba(255, 255, 255, 0.64);
+  --secondary-bg: #eee6d8;
+  --secondary-bg-hover: #e4d9c8;
+  --canvas-bg: #f5efe4;
+  --hud-bg: rgba(251, 250, 246, 0.84);
   --shadow: 0 18px 48px rgba(26, 34, 31, 0.14);
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
 }
 
 * {
@@ -30,9 +63,9 @@ body {
   margin: 0;
   color: var(--ink);
   background:
-    linear-gradient(115deg, rgba(11, 102, 112, 0.12), transparent 34%),
-    linear-gradient(245deg, rgba(184, 95, 61, 0.12), transparent 40%),
-    #ece7dc;
+    linear-gradient(115deg, rgba(53, 171, 181, 0.16), transparent 34%),
+    linear-gradient(245deg, rgba(226, 138, 98, 0.14), transparent 40%),
+    var(--body-bg);
 }
 
 button,
@@ -58,8 +91,8 @@ button {
   gap: 12px;
   padding: 18px;
   overflow-y: auto;
-  border-right: 1px solid rgba(23, 33, 36, 0.12);
-  background: rgba(251, 250, 246, 0.88);
+  border-right: 1px solid var(--panel-border);
+  background: var(--controls-bg);
   backdrop-filter: blur(14px);
 }
 
@@ -69,6 +102,12 @@ button {
   justify-content: space-between;
   gap: 16px;
   min-height: 56px;
+}
+
+.brand-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .brand h1,
@@ -93,10 +132,10 @@ button {
 
 .panel {
   padding: 14px;
-  border: 1px solid rgba(23, 33, 36, 0.1);
+  border: 1px solid var(--panel-border);
   border-radius: 8px;
   background: var(--panel);
-  box-shadow: 0 6px 18px rgba(39, 43, 38, 0.06);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
 }
 
 .panel-title {
@@ -121,7 +160,7 @@ button {
 }
 
 .source-panel {
-  border-color: rgba(11, 102, 112, 0.2);
+  border-color: rgba(53, 171, 181, 0.26);
 }
 
 .drop-zone {
@@ -134,7 +173,7 @@ button {
   border-radius: 8px;
   background:
     linear-gradient(135deg, rgba(11, 102, 112, 0.08), transparent),
-    rgba(255, 255, 255, 0.64);
+    var(--drop-bg);
 }
 
 .drop-zone.dragging {
@@ -166,7 +205,7 @@ button {
 .field span,
 .range-row span,
 .check-row span {
-  color: #334144;
+  color: var(--label);
   font-size: 13px;
   font-weight: 700;
 }
@@ -250,13 +289,13 @@ input[type="range"] {
 .secondary-button,
 .icon-button {
   color: var(--deep);
-  background: #eee6d8;
-  border-color: rgba(23, 33, 36, 0.1);
+  background: var(--secondary-bg);
+  border-color: var(--panel-border);
 }
 
 .secondary-button:hover,
 .icon-button:hover {
-  background: #e4d9c8;
+  background: var(--secondary-bg-hover);
 }
 
 .icon-button {
@@ -295,9 +334,9 @@ input[type="range"] {
   width: 100%;
   height: 100%;
   min-height: calc(100vh - 40px);
-  border: 1px solid rgba(23, 33, 36, 0.13);
+  border: 1px solid var(--panel-border);
   border-radius: 8px;
-  background: #f5efe4;
+  background: var(--canvas-bg);
   box-shadow: var(--shadow);
 }
 
@@ -310,9 +349,9 @@ input[type="range"] {
   justify-content: space-between;
   gap: 14px;
   padding: 8px 10px;
-  border: 1px solid rgba(23, 33, 36, 0.08);
+  border: 1px solid var(--panel-border);
   border-radius: 6px;
-  background: rgba(251, 250, 246, 0.84);
+  background: var(--hud-bg);
   backdrop-filter: blur(8px);
 }
 

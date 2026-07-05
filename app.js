@@ -8,6 +8,7 @@
 
   const ids = [
     "previewCanvas",
+    "themeButton",
     "resetButton",
     "imageInput",
     "dropZone",
@@ -18,6 +19,7 @@
     "scaleInput",
     "scaleValue",
     "fillModeInput",
+    "clearQualityInput",
     "spacingInput",
     "spacingValue",
     "amplitudeInput",
@@ -70,6 +72,7 @@
     invert: false,
     shapeScale: 0.86,
     fillMode: "waves",
+    clearQuality: "pro",
     spacing: 0.044,
     amplitude: 0.022,
     frequency: 8,
@@ -95,6 +98,7 @@
       el[id] = document.getElementById(id);
     });
 
+    applyTheme("dark");
     seedDefaultMask();
     attachEvents();
     generate();
@@ -106,6 +110,7 @@
       "invertInput",
       "scaleInput",
       "fillModeInput",
+      "clearQualityInput",
       "spacingInput",
       "amplitudeInput",
       "frequencyInput",
@@ -140,6 +145,11 @@
       state.progress = 0;
       el.filenameInput.value = "dune-weaver-fill.thr";
       scheduleGenerate();
+    });
+
+    el.themeButton.addEventListener("click", () => {
+      applyTheme(document.body.dataset.theme === "dark" ? "light" : "dark");
+      draw();
     });
 
     el.playButton.addEventListener("click", () => {
@@ -251,6 +261,14 @@
     return base || "dune-weaver-fill";
   }
 
+  function applyTheme(theme) {
+    document.body.dataset.theme = theme;
+    const light = theme === "light";
+    el.themeButton.innerHTML = light ? "&#9790;" : "&#9788;";
+    el.themeButton.title = light ? "Switch to dark mode" : "Switch to light mode";
+    el.themeButton.setAttribute("aria-label", el.themeButton.title);
+  }
+
   function scheduleGenerate() {
     if (state.pendingGenerate) {
       return;
@@ -274,17 +292,20 @@
     state.outlineSegmentCount = outlineSegments.length * state.outlinePasses;
     state.currentOutlineSegments = outlineSegments;
 
-    if (state.startCenter) {
+    const clearIn = state.fillMode === "clearIn";
+    const clearOut = state.fillMode === "clearOut";
+
+    if (state.startCenter && !clearOut) {
       path.push(point(0, 0, "connector"));
     }
 
-    appendChains(path, fillSegments, "fill");
+    appendChains(path, fillSegments, "fill", clearIn || clearOut);
 
     for (let pass = 0; pass < state.outlinePasses; pass += 1) {
       appendChains(path, cloneSegments(outlineSegments), "outline");
     }
 
-    if (state.endCenter && path.length > 0) {
+    if (state.endCenter && !clearIn && path.length > 0) {
       appendConnector(path, point(0, 0, "connector"));
     }
 
@@ -300,6 +321,7 @@
     state.invert = el.invertInput.checked;
     state.shapeScale = Number(el.scaleInput.value) / 100;
     state.fillMode = el.fillModeInput.value;
+    state.clearQuality = el.clearQualityInput.value;
     state.spacing = Number(el.spacingInput.value) / 1000;
     state.amplitude = Number(el.amplitudeInput.value) / 1000;
     state.frequency = Number(el.frequencyInput.value);
@@ -420,6 +442,12 @@
   }
 
   function generateFillSegments() {
+    if (state.fillMode === "clearIn") {
+      return generateClearSegments("in");
+    }
+    if (state.fillMode === "clearOut") {
+      return generateClearSegments("out");
+    }
     if (state.fillMode === "sweep") {
       return generateSweepSegments();
     }
@@ -494,6 +522,29 @@
     return traceParametric((t) => {
       const radius = 0.018 + t * 0.97;
       const angle = t * TWO_PI * turns;
+      return rotateLocal(Math.cos(angle) * radius, Math.sin(angle) * radius);
+    }, steps);
+  }
+
+  function generateClearSegments(direction) {
+    const presets = {
+      standard: { turns: 33, stepsPerTurn: 104, wobble: 0.004 },
+      pro: { turns: 47, stepsPerTurn: 156, wobble: 0.003 },
+      ultra: { turns: 159, stepsPerTurn: 610, wobble: 0.0015 },
+    };
+    const preset = presets[state.clearQuality] || presets.pro;
+    const steps = preset.turns * preset.stepsPerTurn;
+    const inward = direction === "in";
+
+    return traceParametric((t) => {
+      const sweep = inward ? t : 1 - t;
+      const baseRadius = 0.006 + sweep * 0.989;
+      const ripple =
+        Math.sin(t * TWO_PI * preset.turns * 0.37) * preset.wobble +
+        Math.sin(t * TWO_PI * preset.turns * 0.11 + 1.7) * preset.wobble * 0.65;
+      const radius = clamp(baseRadius + ripple, 0, 0.995);
+      const angleSign = inward ? -1 : 1;
+      const angle = Math.PI / 2 + angleSign * t * TWO_PI * preset.turns;
       return rotateLocal(Math.cos(angle) * radius, Math.sin(angle) * radius);
     }, steps);
   }
@@ -736,10 +787,20 @@
     return out;
   }
 
-  function appendChains(path, sourceSegments, kind) {
+  function appendChains(path, sourceSegments, kind, preserveOrder = false) {
     const segments = sourceSegments
       .filter((segment) => segment.length > 1)
       .map((segment) => resamplePolyline(segment, MAX_STEP));
+
+    if (preserveOrder) {
+      segments.forEach((next) => {
+        if (path.length > 0) {
+          appendConnector(path, next[0]);
+        }
+        next.forEach((p) => appendPoint(path, point(p.x, p.y, kind)));
+      });
+      return;
+    }
 
     while (segments.length > 0) {
       const current = path.length > 0 ? path[path.length - 1] : point(0, 0, kind);
@@ -959,8 +1020,9 @@
     const cx = width / 2;
     const cy = height / 2;
     const radius = Math.min(width, height) * 0.43;
+    const colors = previewColors();
 
-    drawStageBackground(ctx, width, height, cx, cy, radius);
+    drawStageBackground(ctx, width, height, cx, cy, radius, colors);
 
     ctx.save();
     ctx.beginPath();
@@ -973,29 +1035,63 @@
     }
 
     if (state.showConnectors) {
-      drawPathByKind(ctx, cx, cy, radius, "connector", "rgba(184, 95, 61, 0.42)", 1.3, [6, 5]);
+      drawPathByKind(ctx, cx, cy, radius, "connector", colors.connector, 1.3, [6, 5]);
     }
-    drawPathByKind(ctx, cx, cy, radius, "fill", "rgba(11, 102, 112, 0.34)", 1.15, []);
-    drawPathByKind(ctx, cx, cy, radius, "outline", "rgba(23, 33, 36, 0.62)", 1.8, []);
-    drawProgressPath(ctx, cx, cy, radius);
-    drawBall(ctx, cx, cy, radius);
+    drawPathByKind(ctx, cx, cy, radius, "fill", colors.fill, 1.15, []);
+    drawPathByKind(ctx, cx, cy, radius, "outline", colors.outline, 1.8, []);
+    drawProgressPath(ctx, cx, cy, radius, colors);
+    drawBall(ctx, cx, cy, radius, colors);
 
     ctx.restore();
   }
 
-  function drawStageBackground(ctx, width, height, cx, cy, radius) {
-    ctx.fillStyle = "#f3ecdf";
+  function previewColors() {
+    if (document.body.dataset.theme === "light") {
+      return {
+        screen: "#f3ecdf",
+        sandInner: "#eadfc8",
+        sandOuter: "#d8c7a8",
+        ring: "rgba(23, 33, 36, 0.12)",
+        rim: "rgba(23, 33, 36, 0.36)",
+        connector: "rgba(184, 95, 61, 0.42)",
+        fill: "rgba(11, 102, 112, 0.34)",
+        outline: "rgba(23, 33, 36, 0.62)",
+        progress: "rgba(7, 67, 76, 0.92)",
+        ball: "#b85f3d",
+        ballHighlight: "#f2d48e",
+        shadow: "rgba(23, 33, 36, 0.32)",
+      };
+    }
+
+    return {
+      screen: "#101819",
+      sandInner: "#b8a476",
+      sandOuter: "#574b36",
+      ring: "rgba(238, 246, 241, 0.11)",
+      rim: "rgba(238, 246, 241, 0.34)",
+      connector: "rgba(226, 138, 98, 0.52)",
+      fill: "rgba(94, 215, 224, 0.42)",
+      outline: "rgba(240, 231, 203, 0.7)",
+      progress: "rgba(91, 228, 236, 0.94)",
+      ball: "#e28a62",
+      ballHighlight: "#f8d887",
+      shadow: "rgba(0, 0, 0, 0.48)",
+    };
+  }
+
+  function drawStageBackground(ctx, width, height, cx, cy, radius, colors) {
+    ctx.fillStyle = colors.screen;
     ctx.fillRect(0, 0, width, height);
 
     const gradient = ctx.createRadialGradient(cx - radius * 0.25, cy - radius * 0.28, radius * 0.1, cx, cy, radius);
-    gradient.addColorStop(0, "#eadfc8");
-    gradient.addColorStop(1, "#d8c7a8");
+    gradient.addColorStop(0, colors.sandInner);
+    gradient.addColorStop(1, colors.sandOuter);
     ctx.fillStyle = gradient;
     ctx.beginPath();
     ctx.arc(cx, cy, radius, 0, TWO_PI);
     ctx.fill();
 
-    ctx.strokeStyle = "rgba(23, 33, 36, 0.12)";
+    ctx.strokeStyle = colors.ring;
     ctx.lineWidth = 1;
     for (let i = 1; i <= 4; i += 1) {
       ctx.beginPath();
@@ -1003,7 +1099,7 @@
       ctx.stroke();
     }
 
-    ctx.strokeStyle = "rgba(23, 33, 36, 0.36)";
+    ctx.strokeStyle = colors.rim;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(cx, cy, radius, 0, TWO_PI);
@@ -1047,14 +1143,14 @@
     ctx.restore();
   }
 
-  function drawProgressPath(ctx, cx, cy, radius) {
+  function drawProgressPath(ctx, cx, cy, radius, colors) {
     if (state.path.length < 2) {
       return;
     }
 
     const endIndex = Math.max(1, Math.floor(state.progress * (state.path.length - 1)));
     ctx.save();
-    ctx.strokeStyle = "rgba(7, 67, 76, 0.92)";
+    ctx.strokeStyle = colors.progress;
     ctx.lineWidth = 2.4;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
@@ -1072,7 +1168,7 @@
     ctx.restore();
   }
 
-  function drawBall(ctx, cx, cy, radius) {
+  function drawBall(ctx, cx, cy, radius, colors) {
     if (!state.path.length) {
       return;
     }
@@ -1081,15 +1177,15 @@
     const p = toCanvas(state.path[index], cx, cy, radius);
 
     ctx.save();
-    ctx.shadowColor = "rgba(23, 33, 36, 0.32)";
+    ctx.shadowColor = colors.shadow;
     ctx.shadowBlur = 10;
     ctx.shadowOffsetY = 4;
-    ctx.fillStyle = "#b85f3d";
+    ctx.fillStyle = colors.ball;
     ctx.beginPath();
     ctx.arc(p.x, p.y, Math.max(5, radius * 0.019), 0, TWO_PI);
     ctx.fill();
     ctx.shadowColor = "transparent";
-    ctx.fillStyle = "#f2d48e";
+    ctx.fillStyle = colors.ballHighlight;
     ctx.beginPath();
     ctx.arc(p.x - radius * 0.006, p.y - radius * 0.007, Math.max(2, radius * 0.006), 0, TWO_PI);
     ctx.fill();
