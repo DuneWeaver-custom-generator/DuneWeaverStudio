@@ -370,8 +370,8 @@
     el.spacingValue.textContent = state.spacing.toFixed(3);
     el.amplitudeValue.textContent = state.amplitude.toFixed(3);
     el.frequencyValue.textContent = String(state.frequency);
-    el.patternDensityValue.textContent = `${state.patternDensity}x`;
-    el.patternSizeValue.textContent = `${Math.round(state.patternSize * 100)}%`;
+    el.patternDensityValue.textContent = `${state.fillMode === "imagePattern" ? effectivePatternDensity() : state.patternDensity}x`;
+    el.patternSizeValue.textContent = `${Math.round(state.patternSize * patternLogoScale() * 100)}%`;
     el.angleValue.textContent = `${Math.round((state.angleRad * 180) / Math.PI)} deg`;
     el.outlineValue.textContent = String(state.outlinePasses);
     el.rhoValue.textContent = state.rhoMax.toFixed(2);
@@ -437,12 +437,16 @@
     const motifWidth = bounds.maxX - bounds.minX + 1;
     const motifHeight = bounds.maxY - bounds.minY + 1;
     const maxMotifSide = Math.max(1, motifWidth, motifHeight);
-    const stampMaxSide = Math.max(6, Math.round(MASK_SIZE * clamp(state.patternSize, 0.08, 0.55)));
+    const logoScale = patternLogoScale();
+    const stampMaxSide = Math.max(6, Math.round(MASK_SIZE * clamp(state.patternSize * logoScale, 0.035, 0.55)));
     const stampWidth = Math.max(3, Math.round((motifWidth / maxMotifSide) * stampMaxSide));
     const stampHeight = Math.max(3, Math.round((motifHeight / maxMotifSide) * stampMaxSide));
-    const density = clamp(Math.round(state.patternDensity), 2, 10);
+    const density = effectivePatternDensity();
     const step = MASK_SIZE / density;
     const start = step / 2;
+    const angle = state.angleRad;
+    const rotatedBoxWidth = Math.abs(stampWidth * Math.cos(angle)) + Math.abs(stampHeight * Math.sin(angle));
+    const rotatedBoxHeight = Math.abs(stampWidth * Math.sin(angle)) + Math.abs(stampHeight * Math.cos(angle));
 
     for (let row = 0; row < density; row += 1) {
       const cy = start + row * step;
@@ -450,7 +454,7 @@
 
       for (let col = -1; col <= density; col += 1) {
         const cx = start + col * step + stagger;
-        if (!stampCanTouchTable(cx, cy, stampWidth, stampHeight)) {
+        if (!stampCanTouchTable(cx, cy, rotatedBoxWidth, rotatedBoxHeight)) {
           continue;
         }
         stampMask(sourceMask, bounds, out, cx, cy, stampWidth, stampHeight);
@@ -481,6 +485,14 @@
     return maxX >= minX && maxY >= minY ? { minX, minY, maxX, maxY } : null;
   }
 
+  function patternLogoScale() {
+    return state.fillMode === "imagePattern" ? clamp(state.shapeScale, 0.45, 1) : 1;
+  }
+
+  function effectivePatternDensity() {
+    return clamp(Math.round(state.patternDensity / patternLogoScale()), 2, 18);
+  }
+
   function stampCanTouchTable(cx, cy, width, height) {
     const corners = [
       [cx - width / 2, cy - height / 2],
@@ -498,21 +510,23 @@
   }
 
   function stampMask(sourceMask, bounds, out, cx, cy, width, height) {
-    const left = Math.round(cx - width / 2);
-    const top = Math.round(cy - height / 2);
+    const cos = Math.cos(state.angleRad);
+    const sin = Math.sin(state.angleRad);
+    const boxWidth = Math.abs(width * cos) + Math.abs(height * sin);
+    const boxHeight = Math.abs(width * sin) + Math.abs(height * cos);
+    const left = Math.floor(cx - boxWidth / 2);
+    const top = Math.floor(cy - boxHeight / 2);
+    const right = Math.ceil(cx + boxWidth / 2);
+    const bottom = Math.ceil(cy + boxHeight / 2);
     const sourceWidth = Math.max(1, bounds.maxX - bounds.minX);
     const sourceHeight = Math.max(1, bounds.maxY - bounds.minY);
 
-    for (let y = 0; y < height; y += 1) {
-      const ty = top + y;
+    for (let ty = top; ty <= bottom; ty += 1) {
       if (ty < 0 || ty >= MASK_SIZE) {
         continue;
       }
 
-      const sy = bounds.minY + Math.round((y / Math.max(1, height - 1)) * sourceHeight);
-
-      for (let x = 0; x < width; x += 1) {
-        const tx = left + x;
+      for (let tx = left; tx <= right; tx += 1) {
         if (tx < 0 || tx >= MASK_SIZE) {
           continue;
         }
@@ -523,7 +537,18 @@
           continue;
         }
 
-        const sx = bounds.minX + Math.round((x / Math.max(1, width - 1)) * sourceWidth);
+        const dx = tx - cx;
+        const dy = ty - cy;
+        const localX = dx * cos + dy * sin;
+        const localY = -dx * sin + dy * cos;
+        if (Math.abs(localX) > width / 2 || Math.abs(localY) > height / 2) {
+          continue;
+        }
+
+        const sampleX = (localX + width / 2) / Math.max(1, width - 1);
+        const sampleY = (localY + height / 2) / Math.max(1, height - 1);
+        const sx = bounds.minX + Math.round(clamp(sampleX, 0, 1) * sourceWidth);
+        const sy = bounds.minY + Math.round(clamp(sampleY, 0, 1) * sourceHeight);
         if (sourceMask[sy * MASK_SIZE + sx]) {
           out[ty * MASK_SIZE + tx] = 1;
         }
@@ -533,7 +558,7 @@
 
   function createRouteMask(mask) {
     const routeMask = new Uint8Array(mask.length);
-    const pixelRadius = Math.max(0, Math.ceil((state.ballDiameter / Math.max(0.01, state.shapeScale)) * (MASK_SIZE - 1) * 0.5));
+    const pixelRadius = Math.max(0, Math.ceil((state.ballDiameter / Math.max(0.01, activeMaskScale())) * (MASK_SIZE - 1) * 0.5));
 
     if (pixelRadius <= 1) {
       routeMask.set(mask);
@@ -842,16 +867,21 @@
   }
 
   function rotateLocal(x, y) {
-    const c = Math.cos(state.angleRad);
-    const s = Math.sin(state.angleRad);
+    const angle = state.fillMode === "imagePattern" ? 0 : state.angleRad;
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
     return {
       x: x * c - y * s,
       y: x * s + y * c,
     };
   }
 
+  function activeMaskScale() {
+    return state.fillMode === "imagePattern" ? 1 : state.shapeScale;
+  }
+
   function isInside(x, y) {
-    if (!inTable(x, y) || state.shapeScale <= 0) {
+    if (!inTable(x, y) || activeMaskScale() <= 0) {
       return false;
     }
 
@@ -864,8 +894,9 @@
   }
 
   function worldToMaskCell(x, y) {
-    const sx = x / state.shapeScale;
-    const sy = y / state.shapeScale;
+    const scale = activeMaskScale();
+    const sx = x / scale;
+    const sy = y / scale;
 
     if (sx < -1 || sx > 1 || sy < -1 || sy > 1) {
       return null;
@@ -877,11 +908,12 @@
   }
 
   function maskCellToWorld(index) {
+    const scale = activeMaskScale();
     const x = index % MASK_SIZE;
     const y = Math.floor(index / MASK_SIZE);
     return {
-      x: ((x / (MASK_SIZE - 1)) * 2 - 1) * state.shapeScale,
-      y: ((y / (MASK_SIZE - 1)) * 2 - 1) * state.shapeScale,
+      x: ((x / (MASK_SIZE - 1)) * 2 - 1) * scale,
+      y: ((y / (MASK_SIZE - 1)) * 2 - 1) * scale,
     };
   }
 
@@ -1018,11 +1050,12 @@
   }
 
   function gridToWorld(p) {
+    const scale = activeMaskScale();
     const gx = p.x2 / 2;
     const gy = p.y2 / 2;
     return {
-      x: ((gx / (MASK_SIZE - 1)) * 2 - 1) * state.shapeScale,
-      y: ((gy / (MASK_SIZE - 1)) * 2 - 1) * state.shapeScale,
+      x: ((gx / (MASK_SIZE - 1)) * 2 - 1) * scale,
+      y: ((gy / (MASK_SIZE - 1)) * 2 - 1) * scale,
     };
   }
 
@@ -1323,7 +1356,7 @@
       return { index: cell.index, label: state.routeLabels[cell.index] };
     }
 
-    const maxRadius = Math.ceil(Math.max(4, (state.ballDiameter / Math.max(0.01, state.shapeScale)) * MASK_SIZE));
+    const maxRadius = Math.ceil(Math.max(4, (state.ballDiameter / Math.max(0.01, activeMaskScale())) * MASK_SIZE));
     let best = null;
     let bestDistance = Infinity;
 
@@ -1761,7 +1794,7 @@
     ctx.clip();
 
     if (state.showMask && state.maskPreviewCanvas) {
-      const size = radius * 2 * state.shapeScale;
+      const size = radius * 2 * activeMaskScale();
       ctx.drawImage(state.maskPreviewCanvas, cx - size / 2, cy - size / 2, size, size);
     }
 

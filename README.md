@@ -14,7 +14,7 @@ The app uses the mask for fill decisions because that is more dependable for ras
 
 ## Image Pattern Mode
 
-Choose `Image pattern` in `Fill type` to turn the uploaded image into a repeated motif across the table. `Pattern density` controls how many motif repeats are laid out, and `Image size` controls the size of each repeat. The app builds the repeated mask first, then fills and outlines each connected motif using the same ball-aware path routing as the regular logo fill modes.
+Choose `Image pattern` in `Fill type` to turn the uploaded image into a repeated motif across the table. `Pattern density` controls the base repeat count, `Image size` controls the size of each repeat, and `Logo size` acts as an extra motif-size multiplier. When the logo is made smaller, the app automatically adds more repeats instead of shrinking the pattern into the center of the table. In this mode, the `Angle` slider rotates each repeated logo tile so long logos can be packed in a better direction.
 
 ## Ball Size
 
