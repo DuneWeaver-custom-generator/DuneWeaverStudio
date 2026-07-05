@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Dune Weaver THR Studio</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <aside class="controls" aria-label="Generator controls">
+        <div class="brand">
+          <div>
+            <p class="eyebrow">Dune Weaver</p>
+            <h1>THR Studio</h1>
+          </div>
+          <button class="icon-button" id="resetButton" type="button" title="Reset sample" aria-label="Reset sample">
+            &#8635;
+          </button>
+        </div>
+
+        <section class="panel source-panel">
+          <div class="panel-title">
+            <h2>Source</h2>
+            <span id="sourceName">Sample mask</span>
+          </div>
+          <label class="drop-zone" for="imageInput" id="dropZone">
+            <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" />
+            <span class="drop-main">Upload logo</span>
+            <span class="drop-sub">PNG, JPG, WEBP, SVG</span>
+          </label>
+          <label class="range-row">
+            <span>Threshold</span>
+            <input id="thresholdInput" type="range" min="10" max="245" value="150" />
+            <strong id="thresholdValue">150</strong>
+          </label>
+          <label class="check-row">
+            <input id="invertInput" type="checkbox" />
+            <span>Invert mask</span>
+          </label>
+          <label class="range-row">
+            <span>Logo size</span>
+            <input id="scaleInput" type="range" min="45" max="98" value="86" />
+            <strong id="scaleValue">86%</strong>
+          </label>
+        </section>
+
+        <section class="panel">
+          <div class="panel-title">
+            <h2>Motion</h2>
+            <span id="segmentCount">0 segments</span>
+          </div>
+          <label class="field">
+            <span>Fill type</span>
+            <select id="fillModeInput">
+              <option value="waves">Wave fill</option>
+              <option value="sweep">Flatten sweep</option>
+              <option value="orbit">Orbit polish</option>
+              <option value="spiral">Spiral polish</option>
+            </select>
+          </label>
+          <label class="range-row">
+            <span>Line gap</span>
+            <input id="spacingInput" type="range" min="22" max="110" value="44" />
+            <strong id="spacingValue">0.044</strong>
+          </label>
+          <label class="range-row">
+            <span>Wave height</span>
+            <input id="amplitudeInput" type="range" min="0" max="80" value="22" />
+            <strong id="amplitudeValue">0.022</strong>
+          </label>
+          <label class="range-row">
+            <span>Wave count</span>
+            <input id="frequencyInput" type="range" min="2" max="18" value="8" />
+            <strong id="frequencyValue">8</strong>
+          </label>
+          <label class="range-row">
+            <span>Angle</span>
+            <input id="angleInput" type="range" min="-90" max="90" value="0" />
+            <strong id="angleValue">0 deg</strong>
+          </label>
+        </section>
+
+        <section class="panel">
+          <div class="panel-title">
+            <h2>Boundary</h2>
+            <span id="pointCount">0 pts</span>
+          </div>
+          <label class="range-row">
+            <span>Outline passes</span>
+            <input id="outlineInput" type="range" min="0" max="4" value="1" />
+            <strong id="outlineValue">1</strong>
+          </label>
+          <label class="range-row">
+            <span>Max rho</span>
+            <input id="rhoInput" type="range" min="50" max="100" value="96" />
+            <strong id="rhoValue">0.96</strong>
+          </label>
+          <div class="switch-grid">
+            <label class="check-row">
+              <input id="startCenterInput" type="checkbox" checked />
+              <span>Start center</span>
+            </label>
+            <label class="check-row">
+              <input id="endCenterInput" type="checkbox" checked />
+              <span>End center</span>
+            </label>
+            <label class="check-row">
+              <input id="maskPreviewInput" type="checkbox" checked />
+              <span>Mask preview</span>
+            </label>
+            <label class="check-row">
+              <input id="connectorInput" type="checkbox" checked />
+              <span>Connectors</span>
+            </label>
+          </div>
+        </section>
+
+        <section class="panel playback-panel">
+          <div class="panel-title">
+            <h2>Player</h2>
+            <span id="durationLabel">0:00</span>
+          </div>
+          <div class="transport">
+            <button id="playButton" class="primary-button" type="button">
+              <span id="playIcon">&#9654;</span>
+              <span id="playLabel">Play</span>
+            </button>
+            <label class="field speed-field">
+              <span>Speed</span>
+              <select id="speedInput">
+                <option value="0.5">0.5x</option>
+                <option value="1" selected>1x</option>
+                <option value="2">2x</option>
+                <option value="4">4x</option>
+              </select>
+            </label>
+          </div>
+          <input id="timelineInput" class="timeline" type="range" min="0" max="1000" value="0" />
+        </section>
+
+        <section class="panel export-panel">
+          <div class="panel-title">
+            <h2>Export</h2>
+            <span id="fileSizeLabel">0 KB</span>
+          </div>
+          <label class="field">
+            <span>Filename</span>
+            <input id="filenameInput" type="text" value="dune-weaver-fill.thr" />
+          </label>
+          <div class="export-actions">
+            <button id="downloadButton" class="primary-button" type="button">Download .thr</button>
+            <button id="svgButton" class="secondary-button" type="button">SVG trace</button>
+            <button id="copyButton" class="secondary-button" type="button">Copy</button>
+          </div>
+          <p id="copyStatus" class="status-line" aria-live="polite"></p>
+        </section>
+      </aside>
+
+      <section class="stage" aria-label="Path preview">
+        <canvas id="previewCanvas"></canvas>
+        <div class="hud">
+          <span id="pathLengthLabel">0.00 table widths</span>
+          <span id="rhoRangeLabel">rho 0.00-0.00</span>
+        </div>
+      </section>
+    </main>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>
